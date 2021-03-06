@@ -13,21 +13,55 @@ from tensorflow.keras import models, layers
 from tensorflow.keras.preprocessing import image
 
 
-def encode_inchi_name(inchi_name: str = ''):
-    return []
+def encode_inchi_name(inchi_name: str, codex_list: list):
+    """
+    This function encodes an InChI identifier using One-Hot Encoding and floating point numbers
+
+    :param inchi_name: InChI Identifier string
+    :param codex_list: List of all character values encountered in the InChI identifiers
+    :return: encoded_name: Encoded version of the InChI identifier
+    """
+    encoded_name = []
+    encoded_numeric = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                       0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+    for character in inchi_name:
+        if character.isnumeric():
+            encoded_name.append([encoded_numeric, [float(character)]])
+        else:
+            char_index = codex.index(character)
+            encoded_character = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            encoded_character[char_index] = 1.0
+            encoded_name.append([encoded_character, [0.0]])
+
+    return encoded_name
 
 
-def decode_inchi_name(encoded_name=None):
-    if encoded_name is None:
-        encoded_name = []
-    return ''
+def decode_inchi_name(encoded_name: list, codex_list: list):
+    """
+    This function decodes the One-Hot Encoded and floating point numbers back to the original InChI identifier
+
+    :param encoded_name: Encoded version of the InChI identifier
+    :param codex_list: List of all character values encountered in the InChI identifiers
+    :return: inchi_name: InChI Identifier string
+    """
+    inchi_name = ''
+
+    for encoded_character in encoded_name:
+        if encoded_character[0][-1] == 1.0:
+            inchi_name = inchi_name + str(int(encoded_character[1][0]))
+        else:
+            inchi_name = inchi_name + codex_list[encoded_character[0].index(1.0)]
+
+    return inchi_name
 
 
 def training_generator():
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
-    
+
     :return: image_data_array, image_name, output_string
     """
     training_labels_file = 'D:\\Datasets\\bms-molecular-translation\\train_labels.csv'
@@ -71,7 +105,18 @@ def training_generator():
 
 
 if __name__ == '__main__':
+    """
+    """
+
+    codex = []
+    with open('Codex.csv', newline='\n') as csv_file:
+        csv_reader = csv.reader(csv_file, delimiter=',')
+        for row in csv_reader:
+            codex = row
+
     num_epochs = 100
-    for i, training_data in enumerate(training_generator()):
+    train_gen = training_generator()
+
+    for i, training_data in enumerate(train_gen):
         if i > num_epochs:
             break
