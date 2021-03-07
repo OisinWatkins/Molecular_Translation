@@ -9,7 +9,6 @@ import matplotlib.pyplot as plt
 from PIL import Image, ImageOps
 from os import listdir
 from os.path import isfile, join
-from tensorflow import keras
 from tensorflow.keras import backend as K
 from tensorflow.keras import models, layers
 from tensorflow.keras.preprocessing import image
@@ -43,7 +42,7 @@ def encode_inchi_name(inchi_name: str, codex_list: list):
         elif character.isnumeric():
             numeric_str = character
             # Handle numeric values longer than 1 character
-            for char_after in inchi_name[index+1:-1]:
+            for char_after in inchi_name[index + 1:-1]:
                 if char_after.isnumeric():
                     numeric_str = numeric_str + char_after
                     counter = counter + 1
@@ -113,7 +112,7 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
                 image_data = image_data.convert('1')
                 image_data = ImageOps.pad(image_data, (1500, 1000), color=1)
 
-                image_data_array = np.array(image_data).astype(np.float32)
+                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1000, 1500, 1))
 
                 # Find the correct label from the csv file data
                 image_name = file[0:-4]
@@ -123,7 +122,128 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
                         output_string = label[1]
                         break
 
-                yield image_data_array, output_string
+                yield image_data_array, None  # output_string
+
+
+"""
+------------------------------------------------------------------------------------------------------------------------
+Code needed to build and train CVAE
+Source:
+    https://www.tensorflow.org/tutorials/generative/cvae
+------------------------------------------------------------------------------------------------------------------------
+"""
+
+
+class CVAE(tf.keras.Model):
+    """
+    Convolutional variational autoencoder.
+    """
+
+    def __init__(self, latent_dim, input_shape):
+        super(CVAE, self).__init__()
+        self.latent_dim = latent_dim
+
+        encoding_input = layers.InputLayer(input_shape=input_shape)
+        encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu')(encoding_input)
+        encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
+        encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
+
+        shape_before_flattening = K.int_shape(encoding_layer)
+
+        encoder_flatten = layers.Flatten()(encoding_layer)
+        # No activation
+        encoding_output = layers.Dense(latent_dim + latent_dim)(encoder_flatten)
+
+        self.encoder = models.Model(encoding_input, encoding_output)
+
+        decoder_input = layers.InputLayer(input_shape=(latent_dim,))
+        decoder_layer = layers.Dense(units=np.prod(shape_before_flattening), activation=tf.nn.relu)(decoder_input)
+        decoder_layer = layers.Reshape(target_shape=shape_before_flattening)(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        # No activation
+        decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
+
+        self.decoder = models.Model(decoder_input, decoder_output)
+
+    @tf.function
+    def sample(self, eps=None):
+        if eps is None:
+            eps = tf.random.normal(shape=(100, self.latent_dim))
+        return self.decode(eps, apply_sigmoid=True)
+
+    def encode(self, x):
+        mean, logvar = tf.split(self.encoder(x), num_or_size_splits=2, axis=1)
+        return mean, logvar
+
+    def reparameterize(self, mean, logvar):
+        eps = tf.random.normal(shape=mean.shape)
+        return eps * tf.exp(logvar * .5) + mean
+
+    def decode(self, z, apply_sigmoid=False):
+        logits = self.decoder(z)
+        if apply_sigmoid:
+            probs = tf.sigmoid(logits)
+            return probs
+        return logits
+
+
+def log_normal_pdf(sample, mean, logvar, raxis=1):
+    log2pi = tf.math.log(2. * np.pi)
+    return tf.reduce_sum(
+        -.5 * ((sample - mean) ** 2. * tf.exp(-logvar) + logvar + log2pi),
+        axis=raxis)
+
+
+def compute_loss(model, x):
+    mean, logvar = model.encode(x)
+    z = model.reparameterize(mean, logvar)
+    x_logit = model.decode(z)
+    cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=x)
+    logpx_z = -tf.reduce_sum(cross_ent, axis=[1, 2, 3])
+    logpz = log_normal_pdf(z, 0., 0.)
+    logqz_x = log_normal_pdf(z, mean, logvar)
+    return -tf.reduce_mean(logpx_z + logpz - logqz_x)
+
+
+@tf.function
+def train_step(model, x, optimizer):
+    """
+    Executes one training step and returns the loss.
+
+    This function computes the loss and gradients, and uses the latter to
+    update the model's parameters.
+    """
+    with tf.GradientTape() as tape:
+        loss = compute_loss(model, x)
+    gradients = tape.gradient(loss, model.trainable_variables)
+    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+
+
+def generate_and_save_images(model, epoch, test_sample):
+    mean, logvar = model.encode(test_sample)
+    z = model.reparameterize(mean, logvar)
+    predictions = model.sample(z)
+    fig = plt.figure(figsize=(4, 4))
+
+    for i in range(predictions.shape[0]):
+        plt.subplot(4, 4, i + 1)
+        plt.imshow(predictions[i, :, :, 0], cmap='gray')
+        plt.axis('off')
+
+    # tight_layout minimizes the overlap between 2 sub-plots
+    plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
+    plt.show()
+
+
+"""
+------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
+"""
 
 
 if __name__ == '__main__':
@@ -166,10 +286,11 @@ if __name__ == '__main__':
     validation_folder_permutations = list(itertools.permutations(training_folder_layers, 2))
     validation_folder_permutations = list(dict.fromkeys(validation_folder_permutations))
     for i in range(len(validation_folder_permutations)):
-        validation_folder_permutations[i] = ['e', validation_folder_permutations[i][0], validation_folder_permutations[i][1]]
+        validation_folder_permutations[i] = ['e', validation_folder_permutations[i][0],
+                                             validation_folder_permutations[i][1]]
 
     # Prepare all permutations of folders for the testing data. All folders under the uppermost 'f' folder are used
-    testing_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4','5', '5', '6', '6', '7', '7', '8', '9',
+    testing_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4', '5', '5', '6', '6', '7', '7', '8', '9',
                              '9', 'a', 'a', 'b', 'b', 'c', 'c', 'd', 'd', 'e', 'e', 'f', 'f']
     testing_folder_permutations = list(itertools.permutations(training_folder_layers, 2))
     testing_folder_permutations = list(dict.fromkeys(testing_folder_permutations))
@@ -181,98 +302,25 @@ if __name__ == '__main__':
     validation_gen = data_generator(training_labels, validation_folder_permutations)
     test_gen = data_generator(training_labels, testing_folder_permutations)
 
+    """
+    --------------------------------------------------------------------------------------------------------------------
+    Now building and training CVAE
+    --------------------------------------------------------------------------------------------------------------------
+    """
     # First, let's build a VAE to handle feature extraction
-    img_shape = (1500, 1000, 1)
-    latent_dim = 100
+    optimizer = tf.keras.optimizers.Adam(1e-4)
 
-    input_img = keras.Input(shape=img_shape)
+    epochs = 10
+    latent_dimension = 2
+    input_dimension = (1000, 1500, 1)
+    num_examples_to_generate = 16
 
-    # Now let's provide a collection of layers to handle encoding the image input.
-    x = layers.Conv2D(32, 3, padding='same', activation='relu')(input_img)
-    x = layers.Conv2D(64, 3, padding='same', activation='relu', strides=(2, 2))(x)
-    x = layers.Conv2D(64, 3, padding='same', activation='relu')(x)
-    x = layers.Conv2D(64, 3, padding='same', activation='relu')(x)
+    random_vector_for_generation = tf.random.normal(
+        shape=[num_examples_to_generate, latent_dimension])
+    cvae_model = CVAE(latent_dimension, input_dimension)
 
-    # Finally let's encode the image input using Dense layers. Be sure to grab the shape of the Tensor
-    # before flattening for use later.
-    shape_before_flattening = K.int_shape(x)
-
-    x = layers.Flatten()(x)
-    z_mean = layers.Dense(latent_dim)(x)
-    z_log_var = layers.Dense(latent_dim)(x)
-
-    def sampling(args):
-        """
-        This function will encode and sample the encoding space. We'll use this function in a Lambda
-        layer later.
-
-        :param: args:
-        :return: A sampled point in the encoded space.
-        """
-        z_mean, z_log_var = args
-        epsilon = K.random_normal(shape=(K.shape(z_mean)[0], latent_dim), mean=0.0, stddev=1.0)
-
-        return z_mean + K.exp(z_log_var) * epsilon
-
-    # Use the sampling function in a Lambda layer.
-    z = layers.Lambda(sampling)([z_mean, z_log_var])
-
-    # Now let's make the decoder.
-    decoder_input = layers.Input(K.int_shape(z)[1:])
-
-    # Upsample the image.
-    x = layers.Dense(np.prod(shape_before_flattening[1:]),
-                     activation='relu')(decoder_input)
-
-    # Reshape z to match the shape of z prior to flattening.
-    x = layers.Reshape(shape_before_flattening[1:])(x)
-
-    # Use a Conv2DTranspose and a Conv2D to decode z into an output that's the same size as the input.
-    x = layers.Conv2DTranspose(32, 3, padding='same', activation='relu', strides=(2, 2))(x)
-    x = layers.Conv2D(1, 3, padding='same', activation='sigmoid')(x)
-
-    # Build the decoder model and define the decoder output.
-    decoder = models.Model(decoder_input, x)
-    z_decoded = decoder(z)
-
-    # The dual loss of a VAE doesn't fit the tradional expectation of a sample-wise function of the normal format
-    # loss(input, target). Thus we'll need to setup the loss by writing a custom layer that internally uses a
-    # built-in add_loss layer method to create an arbitrary loss.
-    class CustomVariationLayer(keras.layers.Layer):
-
-        def vae_loss(self, x, z_decoded):
-            """
-            Custom loss function for VAE's
-
-            :param: self:
-            :param: x: Input image
-            :param: z_decoded: Output image
-            :return: Mean of xent_loss and kl_loss
-            """
-            x = K.flatten(x)
-            z_decoded = K.flatten(z_decoded)
-            xent_loss = keras.metrics.binary_crossentropy(x, z_decoded)
-            kl_loss = -5e-4 * K.mean(1 + z_log_var - K.square(z_mean) - K.exp(z_log_var), axis=-1)
-            return K.mean(xent_loss + kl_loss)
-
-        def call(self, inputs, **kwargs):
-            """
-            This function is used to implement the custom VAE loss function defined above. The output from the
-            function is not needed by the caller, however the function is required to return something.
-
-            :param: self: CustomVariationLayer object
-            :param: inputs: A list containing both the input values and the decoded values.
-            :return: Anything, the function output isn't used by the caller.
-            """
-            x = inputs[0]
-            z_decoded = inputs[1]
-            loss = self.vae_loss(x, z_decoded)
-            self.add_loss(loss, inputs=inputs)
-            return x
-
-    y = CustomVariationLayer()([input_img, z_decoded])
-
-    # Now let's compile and train the model.
-    vae = models.Model(input_img, y)
-    vae.compile(optimizer='rmsprop', loss=None)
-    vae.summary()
+    """
+    --------------------------------------------------------------------------------------------------------------------
+    CVAE Built and Saved
+    --------------------------------------------------------------------------------------------------------------------
+    """
