@@ -1,5 +1,5 @@
-import re
 import csv
+import time
 import random
 import itertools
 import numpy as np
@@ -7,6 +7,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 from PIL import Image, ImageOps
+from IPython import display
 from os import listdir
 from os.path import isfile, join
 from tensorflow.keras import backend as K
@@ -311,6 +312,7 @@ if __name__ == '__main__':
     optimizer = tf.keras.optimizers.Adam(1e-4)
 
     epochs = 10
+    presentations = 5
     latent_dimension = 2
     input_dimension = (1000, 1500, 1)
     num_examples_to_generate = 16
@@ -318,6 +320,30 @@ if __name__ == '__main__':
     random_vector_for_generation = tf.random.normal(
         shape=[num_examples_to_generate, latent_dimension])
     cvae_model = CVAE(latent_dimension, input_dimension)
+
+    # generate_and_save_images(cvae_model, 0, test_sample)
+
+    for epoch in range(1, epochs + 1):
+        start_time = time.time()
+        for presentation_num, train_x in enumerate(train_gen):
+            if presentation_num == presentations:
+                break
+            train_step(cvae_model, train_x[0], optimizer)
+        end_time = time.time()
+
+        loss = tf.keras.metrics.Mean()
+        for presentation_num, test_x in enumerate(test_gen):
+            if presentation_num == presentations:
+                break
+            loss(compute_loss(cvae_model, test_x[0]))
+        elbo = -loss.result()
+        display.clear_output(wait=False)
+        print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'
+              .format(epoch, elbo, end_time - start_time))
+
+        # generate_and_save_images(cvae_model, epoch, test_sample)
+
+    cvae_model.save('cvae_model.h5')
 
     """
     --------------------------------------------------------------------------------------------------------------------
