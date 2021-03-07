@@ -10,6 +10,7 @@ from PIL import Image, ImageOps
 from IPython import display
 from os import listdir
 from os.path import isfile, join
+from tensorflow import keras
 from tensorflow.keras import backend as K
 from tensorflow.keras import models, layers
 from tensorflow.keras.preprocessing import image
@@ -144,12 +145,13 @@ class CVAE(tf.keras.Model):
         super(CVAE, self).__init__()
         self.latent_dim = latent_dim
 
-        encoding_input = layers.InputLayer(input_shape=input_shape)
+        encoding_input = keras.Input(shape=input_shape)
         encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu')(encoding_input)
         encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
 
         shape_before_flattening = K.int_shape(encoding_layer)
+        print(f"\n\tShape Before Flattening: {shape_before_flattening}\n")
 
         encoder_flatten = layers.Flatten()(encoding_layer)
         # No activation
@@ -157,9 +159,9 @@ class CVAE(tf.keras.Model):
 
         self.encoder = models.Model(encoding_input, encoding_output)
 
-        decoder_input = layers.InputLayer(input_shape=(latent_dim,))
-        decoder_layer = layers.Dense(units=np.prod(shape_before_flattening), activation=tf.nn.relu)(decoder_input)
-        decoder_layer = layers.Reshape(target_shape=shape_before_flattening)(decoder_layer)
+        decoder_input = keras.Input(shape=(latent_dim,))
+        decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
+        decoder_layer = layers.Reshape(target_shape=shape_before_flattening[1:])(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
