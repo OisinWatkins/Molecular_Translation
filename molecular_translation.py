@@ -1,3 +1,4 @@
+import re
 import csv
 import random
 import itertools
@@ -24,10 +25,22 @@ def encode_inchi_name(inchi_name: str, codex_list: list):
     encoded_name = []
     encoded_numeric = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    counter = 0
 
-    for character in inchi_name:
-        if character.isnumeric():
-            encoded_name.append([encoded_numeric, [float(character)]])
+    for index, character in enumerate(inchi_name):
+        if not counter == 0:
+            counter = counter - 1
+            continue
+        elif character.isnumeric():
+            numeric_str = character
+            for char_after in inchi_name[index+1:-1]:
+                if char_after.isnumeric():
+                    numeric_str = numeric_str + char_after
+                    counter = counter + 1
+                else:
+                    break
+            encoded_name.append([encoded_numeric, [float(numeric_str)]])
+
         else:
             char_index = codex_list.index(character)
             encoded_character = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
