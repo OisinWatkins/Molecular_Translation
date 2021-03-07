@@ -151,7 +151,7 @@ class CVAE(tf.keras.Model):
         encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
 
         shape_before_flattening = K.int_shape(encoding_layer)
-        print(f"\n\tShape Before Flattening: {shape_before_flattening}\n")
+        print(f"\n\tBefore Flatten: {shape_before_flattening}\n")
 
         encoder_flatten = layers.Flatten()(encoding_layer)
         # No activation
@@ -162,12 +162,20 @@ class CVAE(tf.keras.Model):
         decoder_input = keras.Input(shape=(latent_dim,))
         decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
         decoder_layer = layers.Reshape(target_shape=shape_before_flattening[1:])(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same',
+        shape_before_deconv = K.int_shape(decoder_layer)
+        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
+        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=(2, 2), padding='same',
                                                activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
+        shape_before_deconv = K.int_shape(decoder_layer)
+        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
+        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=(2, 2), padding='same',
                                                activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
+        shape_before_deconv = K.int_shape(decoder_layer)
+        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
+        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=(2, 2), padding='same',
                                                activation='relu')(decoder_layer)
+        shape_before_deconv = K.int_shape(decoder_layer)
+        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
 
