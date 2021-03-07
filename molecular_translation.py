@@ -57,27 +57,13 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     return inchi_name
 
 
-def training_generator():
+def data_generator(labels: list, folder_options: list):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
 
     :return: image_data_array, image_name, output_string
     """
-    training_labels_file = 'D:\\Datasets\\bms-molecular-translation\\train_labels.csv'
-    training_labels = []
-    with open(training_labels_file, newline='\n') as csv_file:
-        csv_reader = csv.reader(csv_file, delimiter=',')
-        for idx, row in enumerate(csv_reader):
-            if not idx == 0:
-                training_labels.append(row)
-
-    dataset_path = 'D:\\Datasets\\bms-molecular-translation\\train\\'
-    folder_layers = ['0', '0', '0', '1', '1', '1', '2', '2', '2', '3', '3', '3', '4', '4', '4', '5', '5', '5', '6', '6',
-                     '6', '7', '7', '7', '8', '8', '9', '9', '9', 'a', 'a', 'a', 'b', 'b', 'b', 'c', 'c', 'c', 'd', 'd',
-                     'd', 'e', 'e', 'e', 'f', 'f', 'f']
-    folder_options = list(itertools.permutations(folder_layers, 3))
-
     while True:
         random.shuffle(folder_options)
 
@@ -96,9 +82,9 @@ def training_generator():
                 image_name = file[0:-4]
                 output_string = ''
 
-                for row in training_labels:
-                    if row[0] == image_name:
-                        output_string = row[1]
+                for label in labels:
+                    if label[0] == image_name:
+                        output_string = label[1]
                         break
 
                 yield image_data_array, image_name, output_string
@@ -114,8 +100,24 @@ if __name__ == '__main__':
         for row in csv_reader:
             codex = row
 
+    training_labels_file = 'D:\\Datasets\\bms-molecular-translation\\train_labels.csv'
+    training_labels = []
+    with open(training_labels_file, newline='\n') as csv_file:
+        csv_reader = csv.reader(csv_file, delimiter=',')
+        for idx, row in enumerate(csv_reader):
+            if not idx == 0:
+                training_labels.append(row)
+
+    dataset_path = 'D:\\Datasets\\bms-molecular-translation\\train\\'
+    folder_layers = ['0', '0', '0', '1', '1', '1', '2', '2', '2', '3', '3', '3', '4', '4', '4', '5', '5', '5', '6', '6',
+                     '6', '7', '7', '7', '8', '8', '9', '9', '9', 'a', 'a', 'a', 'b', 'b', 'b', 'c', 'c', 'c', 'd', 'd',
+                     'd', 'e', 'e', 'e', 'f', 'f', 'f']
+    folder_permutations = list(itertools.permutations(folder_layers, 3))
+
+    train_gen = data_generator(training_labels, folder_permutations)
+    validation_gen = data_generator(training_labels, folder_permutations)
+    test_gen = data_generator(training_labels, folder_permutations)
     num_epochs = 100
-    train_gen = training_generator()
 
     for i, training_data in enumerate(train_gen):
         if i > num_epochs:
