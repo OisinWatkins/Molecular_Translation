@@ -29,7 +29,7 @@ def encode_inchi_name(inchi_name: str, codex_list: list):
         if character.isnumeric():
             encoded_name.append([encoded_numeric, [float(character)]])
         else:
-            char_index = codex.index(character)
+            char_index = codex_list.index(character)
             encoded_character = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                                  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
             encoded_character[char_index] = 1.0
@@ -57,7 +57,8 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     return inchi_name
 
 
-def data_generator(labels: list, folder_options: list):
+def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\Datasets\\bms-molecular-translation'
+                                                                           '\\train\\'):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -108,16 +109,33 @@ if __name__ == '__main__':
             if not idx == 0:
                 training_labels.append(row)
 
-    dataset_path = 'D:\\Datasets\\bms-molecular-translation\\train\\'
-    folder_layers = ['0', '0', '0', '1', '1', '1', '2', '2', '2', '3', '3', '3', '4', '4', '4', '5', '5', '5', '6', '6',
-                     '6', '7', '7', '7', '8', '8', '9', '9', '9', 'a', 'a', 'a', 'b', 'b', 'b', 'c', 'c', 'c', 'd', 'd',
-                     'd', 'e', 'e', 'e', 'f', 'f', 'f']
-    folder_permutations = list(itertools.permutations(folder_layers, 3))
+    training_folder_layers = ['0', '0', '0', '1', '1', '1', '2', '2', '2', '3', '3', '3', '4', '4', '4', '5', '5', '5',
+                              '6', '6', '6', '7', '7', '7', '8', '8', '9', '9', '9', 'a', 'a', 'a', 'b', 'b', 'b', 'c',
+                              'c', 'c', 'd', 'd', 'd', 'e', 'e', 'e', 'f', 'f', 'f']
+    training_folder_permutations = list(itertools.permutations(training_folder_layers, 3))
+    training_folder_permutations = list(dict.fromkeys(training_folder_permutations))
+    for permutation in training_folder_permutations:
+        if permutation[0] == 'e' or permutation[0] == 'f':
+            training_folder_permutations.remove(permutation)
 
-    train_gen = data_generator(training_labels, folder_permutations)
-    validation_gen = data_generator(training_labels, folder_permutations)
-    test_gen = data_generator(training_labels, folder_permutations)
-    num_epochs = 100
+    validation_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4', '5', '5', '6', '6', '7', '7', '8',
+                                '9', '9', 'a', 'a', 'b', 'b', 'c', 'c', 'd', 'd', 'e', 'e', 'f', 'f']
+    validation_folder_permutations = list(itertools.permutations(training_folder_layers, 2))
+    validation_folder_permutations = list(dict.fromkeys(validation_folder_permutations))
+    for i in range(len(validation_folder_permutations)):
+        validation_folder_permutations[i] = ['e', validation_folder_permutations[i][0], validation_folder_permutations[i][1]]
+
+    testing_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4','5', '5', '6', '6', '7', '7', '8', '9',
+                             '9', 'a', 'a', 'b', 'b', 'c', 'c', 'd', 'd', 'e', 'e', 'f', 'f']
+    testing_folder_permutations = list(itertools.permutations(training_folder_layers, 2))
+    testing_folder_permutations = list(dict.fromkeys(testing_folder_permutations))
+    for i in range(len(testing_folder_permutations)):
+        testing_folder_permutations[i] = ['f', testing_folder_permutations[i][0], testing_folder_permutations[i][1]]
+
+    train_gen = data_generator(training_labels, training_folder_permutations)
+    validation_gen = data_generator(training_labels, validation_folder_permutations)
+    test_gen = data_generator(training_labels, testing_folder_permutations)
+    num_epochs = 10
 
     for i, training_data in enumerate(train_gen):
         if i > num_epochs:
