@@ -16,16 +16,21 @@ from tensorflow.keras import models, layers
 from tensorflow.keras.preprocessing import image
 
 
-def encode_inchi_name(inchi_name: str, codex_list: list):
+def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300):
     """
     This function encodes an InChI identifier using One-Hot Encoding and floating point numbers
 
     :param inchi_name: InChI Identifier string
-    :param codex_list: List of all character values encountered in the InChI identifiers
+    :param codex_list: List of all character values encountered in the InChI Identifiers
+    :param padded_size: The required padded length of the encoded InChI Identifier
     :return: encoded_name: Encoded version of the InChI identifier
     """
     # Empty list for the encoded name
     encoded_name = []
+
+    # Value encoding an empty part of the string (used for padding to the end)
+    encoded_empty = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # Value encoding a numeric part of the input string
     encoded_numeric = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
@@ -50,10 +55,8 @@ def encode_inchi_name(inchi_name: str, codex_list: list):
                     counter = counter + 1
                 else:
                     break
-
             # Add the encoded numeric and the floating point value to the encoded_name
             encoded_name.append([encoded_numeric, [float(numeric_str)]])
-
         # Otherwise encode a string value normally using the provided codex_list
         else:
             char_index = codex_list.index(character)
@@ -61,6 +64,11 @@ def encode_inchi_name(inchi_name: str, codex_list: list):
                                  0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
             encoded_character[char_index] = 1.0
             encoded_name.append([encoded_character, [0.0]])
+
+    # No pad the encoded InChI identifier with empty characters
+    if len(encoded_name) < padded_size:
+        for extra_i in range(100 - len(encoded_name)):
+            encoded_name.append([encoded_empty, [0.0]])
 
     return encoded_name
 
@@ -76,11 +84,18 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     # Empty string to store the decoded name
     inchi_name = ''
 
+    # Value encoding an empty part of the string (used for padding to the end)
+    encoded_empty = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
     # For every encoded value in the list
     for encoded_character in encoded_name:
         # If the value encountered is a numeric value, concatenate the output string
         if encoded_character[0][-1] == 1.0:
             inchi_name = inchi_name + str(int(encoded_character[1][0]))
+        # If the encoded character is empty, skip it
+        elif encoded_character[0] == encoded_empty:
+            continue
         # Otherwise concatenate the value in the codex at that given index
         else:
             inchi_name = inchi_name + codex_list[encoded_character[0].index(1.0)]
@@ -256,12 +271,14 @@ if __name__ == '__main__':
     All necessary generators will be instantiated prior to any development or training of any model.
     """
 
+    print("\n\n\n-----Preparing to train on the bms_molecular_translation dataset-----")
     # Grab the codex for the One-Hot Encoding scheme used here
     codex = []
     with open('Codex.csv', newline='\n') as csv_file:
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in csv_reader:
             codex = row
+    print("\n-Codex has been loaded")
 
     # Grab all Training Labels used for this dataset
     training_labels_file = 'D:\\Datasets\\bms-molecular-translation\\train_labels.csv'
@@ -271,6 +288,7 @@ if __name__ == '__main__':
         for idx, row in enumerate(csv_reader):
             if not idx == 0:
                 training_labels.append(row)
+    print("\n-Training Labels have been loaded")
 
     # Prepare all permutations of folders for the training data. All folders except the uppermost 'e' and 'f' folders
     # are used
@@ -282,6 +300,7 @@ if __name__ == '__main__':
     for permutation in training_folder_permutations:
         if permutation[0] == 'e' or permutation[0] == 'f':
             training_folder_permutations.remove(permutation)
+    print("\n-Training Permutations ready")
 
     # Prepare all permutations of folders for the validation data. All folders under the uppermost 'e' folder are used
     validation_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4', '5', '5', '6', '6', '7', '7', '8',
@@ -291,6 +310,7 @@ if __name__ == '__main__':
     for i in range(len(validation_folder_permutations)):
         validation_folder_permutations[i] = ['e', validation_folder_permutations[i][0],
                                              validation_folder_permutations[i][1]]
+    print("\n-Validation Permutations ready")
 
     # Prepare all permutations of folders for the testing data. All folders under the uppermost 'f' folder are used
     testing_folder_layers = ['0', '0', '1', '1', '2', '2', '3', '3', '4', '4', '5', '5', '6', '6', '7', '7', '8', '9',
@@ -299,11 +319,13 @@ if __name__ == '__main__':
     testing_folder_permutations = list(dict.fromkeys(testing_folder_permutations))
     for i in range(len(testing_folder_permutations)):
         testing_folder_permutations[i] = ['f', testing_folder_permutations[i][0], testing_folder_permutations[i][1]]
+    print("\n-Testing Permutations ready")
 
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations)
     validation_gen = data_generator(training_labels, validation_folder_permutations)
     test_gen = data_generator(training_labels, testing_folder_permutations)
+    print("\n-Data Generators are ready")
 
     """
     --------------------------------------------------------------------------------------------------------------------
@@ -313,15 +335,23 @@ if __name__ == '__main__':
     # First, let's build a VAE to handle feature extraction
     optimizer = tf.keras.optimizers.Adam(1e-4)
 
-    epochs = 10
+    epochs = 20
     presentations = 5
     latent_dimension = 100
     input_dimension = (1500, 1500, 1)
-    num_examples_to_generate = 16
+    # num_examples_to_generate = 16
+    print(f"\n-Training Hyperparameters:\n"
+          f"\tEpochs: {epochs}\n"
+          f"\tPresentations per epoch: {presentations}\n"
+          f"\tLatent Dimensions: {latent_dimension}\n")
 
-    random_vector_for_generation = tf.random.normal(
-        shape=[num_examples_to_generate, latent_dimension])
+    # random_vector_for_generation = tf.random.normal(
+    #     shape=[num_examples_to_generate, latent_dimension])
     cvae_model = CVAE(latent_dimension, input_dimension)
+
+    cvae_model.encoder.summary()
+    print("\n\n")
+    cvae_model.decoder.summary()
 
     # generate_and_save_images(cvae_model, 0, test_sample)
 
