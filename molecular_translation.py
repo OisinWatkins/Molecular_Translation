@@ -157,7 +157,7 @@ class CVAE(tf.keras.Model):
         encoder_flatten = layers.Flatten()(encoding_layer)
         # No activation
         encoding_output = layers.Dense(latent_dim + latent_dim)(encoder_flatten)
-        self.encoder = models.Model(encoding_input, encoding_output)
+        self.encoder = models.Model(encoding_input, encoding_output, name='Encoder')
 
         decoder_input = keras.Input(shape=(latent_dim,))
         decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
@@ -171,7 +171,7 @@ class CVAE(tf.keras.Model):
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
         decoder_output = layers.Cropping2D(cropping=((2, 2), (2, 2)))(decoder_output)
-        self.decoder = models.Model(decoder_input, decoder_output)
+        self.decoder = models.Model(decoder_input, decoder_output, name='Decoder')
 
     @tf.function
     def sample(self, eps=None):
@@ -345,7 +345,8 @@ if __name__ == '__main__':
 
         # generate_and_save_images(cvae_model, epoch, test_sample)
 
-    cvae_model.save('cvae_model.h5')
+    cvae_model.encoder.save('Encoder.h5')
+    cvae_model.decoder.save('Decoder.h5')
 
     """
     --------------------------------------------------------------------------------------------------------------------
