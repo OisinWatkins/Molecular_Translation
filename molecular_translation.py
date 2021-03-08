@@ -112,9 +112,9 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
                 file_path = full_path + file
                 image_data = Image.open(file_path)
                 image_data = image_data.convert('1')
-                image_data = ImageOps.pad(image_data, (1500, 1000), color=1)
+                image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
 
-                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1000, 1500, 1))
+                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
 
                 # Find the correct label from the csv file data
                 image_name = file[0:-4]
@@ -146,39 +146,31 @@ class CVAE(tf.keras.Model):
         self.latent_dim = latent_dim
 
         encoding_input = keras.Input(shape=input_shape)
-        encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu')(encoding_input)
-        encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
-        encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), activation='relu')(encoding_layer)
+        encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_input)
+        encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_layer)
+        encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_layer)
 
         shape_before_flattening = K.int_shape(encoding_layer)
-        print(f"\n\tBefore Flatten: {shape_before_flattening}\n")
-
         encoder_flatten = layers.Flatten()(encoding_layer)
         # No activation
         encoding_output = layers.Dense(latent_dim + latent_dim)(encoder_flatten)
-
         self.encoder = models.Model(encoding_input, encoding_output)
 
         decoder_input = keras.Input(shape=(latent_dim,))
         decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
         decoder_layer = layers.Reshape(target_shape=shape_before_flattening[1:])(decoder_layer)
-        shape_before_deconv = K.int_shape(decoder_layer)
-        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
-        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=(2, 2), padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        shape_before_deconv = K.int_shape(decoder_layer)
-        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
-        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=(2, 2), padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        shape_before_deconv = K.int_shape(decoder_layer)
-        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
-        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=(2, 2), padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        shape_before_deconv = K.int_shape(decoder_layer)
-        print(f"\n\tBefore DeConv: {shape_before_deconv}\n")
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
-
+        decoder_output = layers.Cropping2D(cropping=((2, 2), (2, 2)))(decoder_output)
         self.decoder = models.Model(decoder_input, decoder_output)
 
     @tf.function
@@ -323,8 +315,8 @@ if __name__ == '__main__':
 
     epochs = 10
     presentations = 5
-    latent_dimension = 2
-    input_dimension = (1000, 1500, 1)
+    latent_dimension = 100
+    input_dimension = (1500, 1500, 1)
     num_examples_to_generate = 16
 
     random_vector_for_generation = tf.random.normal(
