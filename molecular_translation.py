@@ -141,17 +141,19 @@ def rotate_img(img, angle, bg_patch=(5, 5)):
     if rgb:
         bg_color = np.mean(img[:bg_patch[0], :bg_patch[1], :], axis=(0, 1))
     else:
-        bg_color = np.mean(img[:bg_patch[0], :bg_patch[1]])
+        bg_color = 1.0
     img = rotate(img, angle, reshape=False)
     mask = [img <= 0, np.any(img <= 0, axis=-1)][rgb]
     img[mask] = bg_color
+
+    plt.imshow(img)
+    plt.show()
     return img
 
 
 def translate(image, shift=10, direction='right', roll=True):
     assert direction in ['right', 'left', 'down', 'up'], 'Directions should be top|up|left|right'
     img = image.copy()
-    print(f"\n\n\t img shape: {img.shape}")
     if direction == 'right':
         right_slice = img[:, -shift:].copy()
         img[:, shift:] = img[:, :-shift]
@@ -182,8 +184,8 @@ def translate(image, shift=10, direction='right', roll=True):
 """
 
 
-def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\Datasets\\bms-molecular-translation'
-                                                                           '\\train\\'):
+def data_generator(labels: list, folder_options: list,
+                   dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\', augment_data: bool = True):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -191,7 +193,6 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
     :return: image_data_array, image_name, output_string
     """
     # Limitations on the Augmentation performed on the training and validation inputs
-    translations = ['right', 'left', 'down', 'up']
     translation_mag = 10
     rotations_mag = 180
 
@@ -207,25 +208,25 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
 
             # Iterate through each file, preprocess and yield each
             for file in file_list:
-                # Load image in Black and White with a constant size of 1500 x 1000
+                # Prepare Image augmentations
+                rand_translation_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
+                rand_translation_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
+                rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+
+                # Load image in Black and White with a constant size of 1500 x 1500
                 file_path = full_path + file
                 image_data = Image.open(file_path)
                 image_data = image_data.convert('1')
+
+                if augment_data:
+                    # Perform Augmentation
+                    image_data = image_data.rotate(angle=rand_rotation,
+                                                   translate=(rand_translation_mag_vert, rand_translation_mag_horizontal),
+                                                   fillcolor=1,
+                                                   expand=True)
+
                 image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
-
-                plt.imshow(image_data)
-
                 image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
-
-                # Perform Image augmentations
-                rand_translation = np.random.choice(translations)
-                rand_translation_mag = round(np.random.uniform(0, translation_mag))
-                rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
-
-                image_data_array[0] = translate(rotate_img(image_data_array[0], rand_rotation),
-                                                shift=rand_translation_mag, direction=rand_translation)
-
-                plt.imshow(image_data_array[0])
 
                 # Find the correct label from the csv file data
                 image_name = file[0:-4]
@@ -235,7 +236,7 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
                         output_string = label[1]
                         break
 
-                yield image_data_array, None  # output_string
+                yield image_data_array, output_string
 
 
 """
@@ -260,7 +261,7 @@ class CVAE(tf.keras.Model):
         encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_input)
         encoding_layer = layers.Conv2D(filters=128, kernel_size=3, strides=(2, 2), padding='same',
-                                       activation='relu')(encoding_input)
+                                       activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same',
@@ -285,7 +286,7 @@ class CVAE(tf.keras.Model):
                                                activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=128, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=1, padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
@@ -428,7 +429,7 @@ if __name__ == '__main__':
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations)
     validation_gen = data_generator(training_labels, validation_folder_permutations)
-    test_gen = data_generator(training_labels, testing_folder_permutations)
+    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
     print("\n-Data Generators are ready")
 
     """
@@ -453,27 +454,34 @@ if __name__ == '__main__':
     cvae_model = CVAE(latent_dimension, input_dimension)
 
     # Provide Summary for Encoder and Decoder Models
+    print("\n\n")
     cvae_model.encoder.summary()
     print("\n\n")
     cvae_model.decoder.summary()
+    print("\n\n")
 
     # Train Model according to the hyperparameters defines above
+    print("-----Beginning Training-----")
     for epoch in range(1, epochs + 1):
         start_time = time.time()
+        print(f"Epoch: {epoch}\t Training: [", end='', flush=True)
         for presentation_num, train_x in enumerate(train_gen):
+            if (presentations / presentation_num) % 10 == 0:
+                print(f"-", end='', flush=True)
             if presentation_num == presentations:
+                print(f"]", end='', flush=True)
                 break
-            train_step(cvae_model, train_x, optimizer)
+            train_step(cvae_model, train_x[0], optimizer)
         end_time = time.time()
 
         loss = tf.keras.metrics.Mean()
         for presentation_num, val_x in enumerate(validation_gen):
             if presentation_num == (presentations/100):
                 break
-            loss(compute_loss(cvae_model, val_x))
+            loss(compute_loss(cvae_model, val_x[0]))
         elbo = -loss.result()
         display.clear_output(wait=False)
-        print(f"Epoch: {epoch}: Validation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
+        print(f"\tValidation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
 
     # Save each model before continuing
     cvae_model.encoder.save('Encoder.h5')
