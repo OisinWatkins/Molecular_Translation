@@ -1,5 +1,6 @@
 import csv
 import time
+import scipy
 import random
 import itertools
 import numpy as np
@@ -8,12 +9,12 @@ import matplotlib.pyplot as plt
 
 from PIL import Image, ImageOps
 from IPython import display
+from scipy.ndimage import rotate
 from os import listdir
 from os.path import isfile, join
 from tensorflow import keras
 from tensorflow.keras import backend as K
 from tensorflow.keras import models, layers
-from tensorflow.keras.preprocessing import image
 
 
 def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300):
@@ -142,6 +143,56 @@ def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\
                 yield image_data_array, None  # output_string
 
 
+def gaussian_noise(img, mean=0, sigma=0.03):
+    img = img.copy()
+    noise = np.random.normal(mean, sigma, img.shape)
+    mask_overflow_upper = img+noise >= 1.0
+    mask_overflow_lower = img+noise < 0
+    noise[mask_overflow_upper] = 1.0
+    noise[mask_overflow_lower] = 0
+    img += noise
+    return img
+
+
+def rotate_img(img, angle, bg_patch=(5, 5)):
+    assert len(img.shape) <= 3, "Incorrect image shape"
+    rgb = img.shape[-1] == 3
+    if rgb:
+        bg_color = np.mean(img[:bg_patch[0], :bg_patch[1], :], axis=(0, 1))
+    else:
+        bg_color = np.mean(img[:bg_patch[0], :bg_patch[1]])
+    img = rotate(img, angle, reshape=False)
+    mask = [img <= 0, np.any(img <= 0, axis=-1)][rgb]
+    img[mask] = bg_color
+    return img
+
+
+def translate(img, shift=10, direction='right', roll=True):
+    assert direction in ['right', 'left', 'down', 'up'], 'Directions should be top|up|left|right'
+    img = img.copy()
+    if direction == 'right':
+        right_slice = img[:, -shift:].copy()
+        img[:, shift:] = img[:, :-shift]
+        if roll:
+            img[:, :shift] = np.fliplr(right_slice)
+    if direction == 'left':
+        left_slice = img[:, :shift].copy()
+        img[:, :-shift] = img[:, shift:]
+        if roll:
+            img[:, -shift:] = left_slice
+    if direction == 'down':
+        down_slice = img[-shift:, :].copy()
+        img[shift:, :] = img[:-shift,:]
+        if roll:
+            img[:shift, :] = down_slice
+    if direction == 'up':
+        upper_slice = img[:shift, :].copy()
+        img[:-shift, :] = img[shift:, :]
+        if roll:
+            img[-shift:, :] = upper_slice
+    return img
+
+
 """
 ------------------------------------------------------------------------------------------------------------------------
 Code needed to build and train CVAE
@@ -161,8 +212,12 @@ class CVAE(tf.keras.Model):
         self.latent_dim = latent_dim
 
         encoding_input = keras.Input(shape=input_shape)
-        encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same',
+        encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_input)
+        encoding_layer = layers.Conv2D(filters=128, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_input)
+        encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), padding='same',
@@ -182,6 +237,10 @@ class CVAE(tf.keras.Model):
         decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=128, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=1, padding='same',
                                                activation='relu')(decoder_layer)
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
@@ -327,6 +386,11 @@ if __name__ == '__main__':
     test_gen = data_generator(training_labels, testing_folder_permutations)
     print("\n-Data Generators are ready")
 
+    # Limitations on the Augmentation performed on the training and validation inputs
+    translations = ['right', 'left', 'down', 'up']
+    translation_mag = 10
+    rotations_mag = 180
+
     """
     --------------------------------------------------------------------------------------------------------------------
     Now building and training CVAE
@@ -336,8 +400,8 @@ if __name__ == '__main__':
     optimizer = tf.keras.optimizers.Adam(1e-4)
 
     # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    epochs = 500
-    presentations = 10000
+    epochs = 5000
+    presentations = 1000
     latent_dimension = 100
     input_dimension = (1500, 1500, 1)
     print(f"\n-Training Hyperparameters:\n"
@@ -359,14 +423,25 @@ if __name__ == '__main__':
         for presentation_num, train_x in enumerate(train_gen):
             if presentation_num == presentations:
                 break
-            train_step(cvae_model, train_x[0], optimizer)
+            rand_translation = np.random.choice(translations)
+            rand_translation_mag = np.random.uniform(0, translation_mag)
+            rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+            training_input = translate(rotate_img(train_x[0], rand_rotation), shift=rand_translation_mag,
+                                       direction=rand_translation)
+
+            train_step(cvae_model, training_input, optimizer)
         end_time = time.time()
 
         loss = tf.keras.metrics.Mean()
-        for presentation_num, test_x in enumerate(validation_gen):
-            if presentation_num == presentations:
+        for presentation_num, val_x in enumerate(validation_gen):
+            if presentation_num == (presentations/100):
                 break
-            loss(compute_loss(cvae_model, test_x[0]))
+            rand_translation = np.random.choice(translations)
+            rand_translation_mag = np.random.uniform(0, translation_mag)
+            rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+            validation_input = translate(rotate_img(val_x[0], rand_rotation), shift=rand_translation_mag,
+                                         direction=rand_translation)
+            loss(compute_loss(cvae_model, validation_input))
         elbo = -loss.result()
         display.clear_output(wait=False)
         print(f"Epoch: {epoch}: Validation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
