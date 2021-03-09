@@ -19,7 +19,7 @@ from tensorflow.keras import models, layers
 
 """
 ------------------------------------------------------------------------------------------------------------------------
-Encoding and Decoding functions for InChI Names
+Encoding and Decoding functions for InChI Names. Data Generator for general use.
 ------------------------------------------------------------------------------------------------------------------------
 """
 
@@ -111,79 +111,6 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     return inchi_name
 
 
-"""
-------------------------------------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------------------------------------
-"""
-
-
-"""
-------------------------------------------------------------------------------------------------------------------------
-Augmentation functions for Black and White Images
-------------------------------------------------------------------------------------------------------------------------
-"""
-
-
-def gaussian_noise(img, mean=0, sigma=0.03):
-    img = img.copy()
-    noise = np.random.normal(mean, sigma, img.shape)
-    mask_overflow_upper = img+noise >= 1.0
-    mask_overflow_lower = img+noise < 0
-    noise[mask_overflow_upper] = 1.0
-    noise[mask_overflow_lower] = 0
-    img += noise
-    return img
-
-
-def rotate_img(img, angle, bg_patch=(5, 5)):
-    assert len(img.shape) <= 3, "Incorrect image shape"
-    rgb = img.shape[-1] == 3
-    if rgb:
-        bg_color = np.mean(img[:bg_patch[0], :bg_patch[1], :], axis=(0, 1))
-    else:
-        bg_color = 1.0
-    img = rotate(img, angle, reshape=False)
-    mask = [img <= 0, np.any(img <= 0, axis=-1)][rgb]
-    img[mask] = bg_color
-
-    plt.imshow(img)
-    plt.show()
-    return img
-
-
-def translate(image, shift=10, direction='right', roll=True):
-    assert direction in ['right', 'left', 'down', 'up'], 'Directions should be top|up|left|right'
-    img = image.copy()
-    if direction == 'right':
-        right_slice = img[:, -shift:].copy()
-        img[:, shift:] = img[:, :-shift]
-        if roll:
-            img[:, :shift] = np.fliplr(right_slice)
-    if direction == 'left':
-        left_slice = img[:, :shift].copy()
-        img[:, :-shift] = img[:, shift:]
-        if roll:
-            img[:, -shift:] = left_slice
-    if direction == 'down':
-        down_slice = img[-shift:, :].copy()
-        img[shift:, :] = img[:-shift, :]
-        if roll:
-            img[:shift, :] = down_slice
-    if direction == 'up':
-        upper_slice = img[:shift, :].copy()
-        img[:-shift, :] = img[shift:, :]
-        if roll:
-            img[-shift:, :] = upper_slice
-
-    return img
-
-
-"""
-------------------------------------------------------------------------------------------------------------------------
-------------------------------------------------------------------------------------------------------------------------
-"""
-
-
 def data_generator(labels: list, folder_options: list,
                    dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\', augment_data: bool = True):
     """
@@ -237,6 +164,12 @@ def data_generator(labels: list, folder_options: list,
                         break
 
                 yield image_data_array, output_string
+
+
+"""
+------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
+"""
 
 
 """
