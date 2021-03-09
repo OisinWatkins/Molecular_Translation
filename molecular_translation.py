@@ -17,6 +17,13 @@ from tensorflow.keras import backend as K
 from tensorflow.keras import models, layers
 
 
+"""
+------------------------------------------------------------------------------------------------------------------------
+Encoding and Decoding functions for InChI Names
+------------------------------------------------------------------------------------------------------------------------
+"""
+
+
 def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300):
     """
     This function encodes an InChI identifier using One-Hot Encoding and floating point numbers
@@ -104,43 +111,17 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     return inchi_name
 
 
-def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\Datasets\\bms-molecular-translation'
-                                                                           '\\train\\'):
-    """
-    This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
-    output InChI string.
+"""
+------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
+"""
 
-    :return: image_data_array, image_name, output_string
-    """
-    while True:
-        # Shuffle the folder order
-        random.shuffle(folder_options)
 
-        # Iterate through all folder paths
-        for folder_path in folder_options:
-            # Grab all files under a particular folder path
-            full_path = dataset_path + folder_path[0] + '\\' + folder_path[1] + '\\' + folder_path[2] + '\\'
-            file_list = [f for f in listdir(full_path) if isfile(join(full_path, f))]
-
-            # Iterate through each file, preprocess and yield each
-            for file in file_list:
-                # Load image in Black and White with a constant size of 1500 x 1000
-                file_path = full_path + file
-                image_data = Image.open(file_path)
-                image_data = image_data.convert('1')
-                image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
-
-                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
-
-                # Find the correct label from the csv file data
-                image_name = file[0:-4]
-                output_string = ''
-                for label in labels:
-                    if label[0] == image_name:
-                        output_string = label[1]
-                        break
-
-                yield image_data_array, None  # output_string
+"""
+------------------------------------------------------------------------------------------------------------------------
+Augmentation functions for Black and White Images
+------------------------------------------------------------------------------------------------------------------------
+"""
 
 
 def gaussian_noise(img, mean=0, sigma=0.03):
@@ -167,9 +148,10 @@ def rotate_img(img, angle, bg_patch=(5, 5)):
     return img
 
 
-def translate(img, shift=10, direction='right', roll=True):
+def translate(image, shift=10, direction='right', roll=True):
     assert direction in ['right', 'left', 'down', 'up'], 'Directions should be top|up|left|right'
-    img = img.copy()
+    img = image.copy()
+    print(f"\n\n\t img shape: {img.shape}")
     if direction == 'right':
         right_slice = img[:, -shift:].copy()
         img[:, shift:] = img[:, :-shift]
@@ -182,7 +164,7 @@ def translate(img, shift=10, direction='right', roll=True):
             img[:, -shift:] = left_slice
     if direction == 'down':
         down_slice = img[-shift:, :].copy()
-        img[shift:, :] = img[:-shift,:]
+        img[shift:, :] = img[:-shift, :]
         if roll:
             img[:shift, :] = down_slice
     if direction == 'up':
@@ -190,7 +172,70 @@ def translate(img, shift=10, direction='right', roll=True):
         img[:-shift, :] = img[shift:, :]
         if roll:
             img[-shift:, :] = upper_slice
+
     return img
+
+
+"""
+------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
+"""
+
+
+def data_generator(labels: list, folder_options: list, dataset_path: str = 'D:\\Datasets\\bms-molecular-translation'
+                                                                           '\\train\\'):
+    """
+    This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
+    output InChI string.
+
+    :return: image_data_array, image_name, output_string
+    """
+    # Limitations on the Augmentation performed on the training and validation inputs
+    translations = ['right', 'left', 'down', 'up']
+    translation_mag = 10
+    rotations_mag = 180
+
+    while True:
+        # Shuffle the folder order
+        random.shuffle(folder_options)
+
+        # Iterate through all folder paths
+        for folder_path in folder_options:
+            # Grab all files under a particular folder path
+            full_path = dataset_path + folder_path[0] + '\\' + folder_path[1] + '\\' + folder_path[2] + '\\'
+            file_list = [f for f in listdir(full_path) if isfile(join(full_path, f))]
+
+            # Iterate through each file, preprocess and yield each
+            for file in file_list:
+                # Load image in Black and White with a constant size of 1500 x 1000
+                file_path = full_path + file
+                image_data = Image.open(file_path)
+                image_data = image_data.convert('1')
+                image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
+
+                plt.imshow(image_data)
+
+                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
+
+                # Perform Image augmentations
+                rand_translation = np.random.choice(translations)
+                rand_translation_mag = round(np.random.uniform(0, translation_mag))
+                rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+
+                image_data_array[0] = translate(rotate_img(image_data_array[0], rand_rotation),
+                                                shift=rand_translation_mag, direction=rand_translation)
+
+                plt.imshow(image_data_array[0])
+
+                # Find the correct label from the csv file data
+                image_name = file[0:-4]
+                output_string = ''
+                for label in labels:
+                    if label[0] == image_name:
+                        output_string = label[1]
+                        break
+
+                yield image_data_array, None  # output_string
 
 
 """
@@ -386,11 +431,6 @@ if __name__ == '__main__':
     test_gen = data_generator(training_labels, testing_folder_permutations)
     print("\n-Data Generators are ready")
 
-    # Limitations on the Augmentation performed on the training and validation inputs
-    translations = ['right', 'left', 'down', 'up']
-    translation_mag = 10
-    rotations_mag = 180
-
     """
     --------------------------------------------------------------------------------------------------------------------
     Now building and training CVAE
@@ -423,25 +463,14 @@ if __name__ == '__main__':
         for presentation_num, train_x in enumerate(train_gen):
             if presentation_num == presentations:
                 break
-            rand_translation = np.random.choice(translations)
-            rand_translation_mag = np.random.uniform(0, translation_mag)
-            rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
-            training_input = translate(rotate_img(train_x[0], rand_rotation), shift=rand_translation_mag,
-                                       direction=rand_translation)
-
-            train_step(cvae_model, training_input, optimizer)
+            train_step(cvae_model, train_x, optimizer)
         end_time = time.time()
 
         loss = tf.keras.metrics.Mean()
         for presentation_num, val_x in enumerate(validation_gen):
             if presentation_num == (presentations/100):
                 break
-            rand_translation = np.random.choice(translations)
-            rand_translation_mag = np.random.uniform(0, translation_mag)
-            rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
-            validation_input = translate(rotate_img(val_x[0], rand_rotation), shift=rand_translation_mag,
-                                         direction=rand_translation)
-            loss(compute_loss(cvae_model, validation_input))
+            loss(compute_loss(cvae_model, val_x))
         elbo = -loss.result()
         display.clear_output(wait=False)
         print(f"Epoch: {epoch}: Validation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
