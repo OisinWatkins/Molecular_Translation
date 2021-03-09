@@ -332,29 +332,28 @@ if __name__ == '__main__':
     Now building and training CVAE
     --------------------------------------------------------------------------------------------------------------------
     """
-    # First, let's build a VAE to handle feature extraction
+    # First, let's build a CVAE to handle feature extraction
     optimizer = tf.keras.optimizers.Adam(1e-4)
 
-    epochs = 20
-    presentations = 5
+    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
+    epochs = 500
+    presentations = 10000
     latent_dimension = 100
     input_dimension = (1500, 1500, 1)
-    # num_examples_to_generate = 16
     print(f"\n-Training Hyperparameters:\n"
           f"\tEpochs: {epochs}\n"
           f"\tPresentations per epoch: {presentations}\n"
           f"\tLatent Dimensions: {latent_dimension}\n")
 
-    # random_vector_for_generation = tf.random.normal(
-    #     shape=[num_examples_to_generate, latent_dimension])
+    # Instantiate CVAE Model
     cvae_model = CVAE(latent_dimension, input_dimension)
 
+    # Provide Summary for Encoder and Decoder Models
     cvae_model.encoder.summary()
     print("\n\n")
     cvae_model.decoder.summary()
 
-    # generate_and_save_images(cvae_model, 0, test_sample)
-
+    # Train Model according to the hyperparameters defines above
     for epoch in range(1, epochs + 1):
         start_time = time.time()
         for presentation_num, train_x in enumerate(train_gen):
@@ -364,17 +363,15 @@ if __name__ == '__main__':
         end_time = time.time()
 
         loss = tf.keras.metrics.Mean()
-        for presentation_num, test_x in enumerate(test_gen):
+        for presentation_num, test_x in enumerate(validation_gen):
             if presentation_num == presentations:
                 break
             loss(compute_loss(cvae_model, test_x[0]))
         elbo = -loss.result()
         display.clear_output(wait=False)
-        print('Epoch: {}, Test set ELBO: {}, time elapse for current epoch: {}'
-              .format(epoch, elbo, end_time - start_time))
+        print(f"Epoch: {epoch}: Validation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
 
-        # generate_and_save_images(cvae_model, epoch, test_sample)
-
+    # Save each model before continuing
     cvae_model.encoder.save('Encoder.h5')
     cvae_model.decoder.save('Decoder.h5')
 
