@@ -173,7 +173,7 @@ def progbar(curr, total, full_progbar, loss_val):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
     print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
-          '[Current Loss: {:>7.2%}]'.format(loss_val), end='')
+          '[Current Loss: {:>7.2}]'.format(loss_val), end='')
 
 
 """
@@ -389,15 +389,19 @@ if __name__ == '__main__':
     print("\n\n")
 
     # Load previous training models
-    path_for_models = "D:\\AI Projects\\Molecular_Translation Models\\"
-    h5_file_list = [f for f in listdir(path_for_models) if isfile(join(path_for_models, f))]
-    for h5_file in h5_file_list:
-        if h5_file == "Encoder_training.h5":
-            old_encoder = models.load_model(path_for_models + h5_file)
-            cvae_model.encoder.set_weights(weights=old_encoder.weights)
-        elif h5_file == "Decoder_training.h5":
-            old_decoder = models.load_model(path_for_models + h5_file)
-            cvae_model.decoder.set_weights(weights=old_decoder.weights)
+    # print("-Loading Previous Model\n")
+    # path_for_models = "D:\\AI Projects\\Molecular_Translation Models\\"
+    # h5_file_list = [f for f in listdir(path_for_models) if isfile(join(path_for_models, f))]
+    # for h5_file in h5_file_list:
+    #     if h5_file == "Encoder_training.h5":
+    #         old_encoder = models.load_model(path_for_models + h5_file)
+    #         print(old_encoder.weights)
+    #         cvae_model.encoder.set_weights(weights=old_encoder.weights)
+    #     elif h5_file == "Decoder_training.h5":
+    #         old_decoder = models.load_model(path_for_models + h5_file)
+    #         print(old_decoder.weights)
+    #         cvae_model.decoder.set_weights(weights=old_decoder.weights)
+    # print("-Previous Model Loaded\n")
 
     # Train Model according to the hyperparameters defines above
     print("-----Beginning Training-----")
