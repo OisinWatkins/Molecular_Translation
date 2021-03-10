@@ -399,8 +399,9 @@ if __name__ == '__main__':
         start_time = time.time()
         print(f"Epoch: {epoch}\t Training: [", end='', flush=True)
         for presentation_num, train_x in enumerate(train_gen):
-            if (presentations / presentation_num) % 10 == 0:
-                print(f"-", end='', flush=True)
+            if not presentation_num == 0:
+                if (presentations / presentation_num) % 10 == 0:
+                    print(f"-", end='', flush=True)
             if presentation_num == presentations:
                 print(f"]", end='', flush=True)
                 break
