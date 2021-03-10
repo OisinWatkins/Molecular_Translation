@@ -1,9 +1,15 @@
+import os
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import csv
 import time
 import random
 import itertools
 import numpy as np
 import tensorflow as tf
+
+import logging
+logging.getLogger('tensorflow').disabled = True
 
 from PIL import Image, ImageOps
 from IPython import display
@@ -161,6 +167,12 @@ def data_generator(labels: list, folder_options: list,
                         break
 
                 yield image_data_array, output_string
+
+
+def progbar(curr, total, full_progbar):
+    frac = curr / total
+    filled_progbar = round(frac * full_progbar)
+    print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
 
 
 """
@@ -355,8 +367,8 @@ if __name__ == '__main__':
     optimizer = tf.keras.optimizers.Adam(1e-4)
 
     # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    epochs = 5000
-    presentations = 1000
+    epochs = 50000
+    presentations = 100
     latent_dimension = 100
     input_dimension = (1500, 1500, 1)
     print(f"\n-Training Hyperparameters:\n"
@@ -374,23 +386,35 @@ if __name__ == '__main__':
     cvae_model.decoder.summary()
     print("\n\n")
 
+    # Load previous training models
+    path_for_models = "D:\\AI Projects\\Molecular_Translation Models\\"
+    h5_file_list = [f for f in listdir(path_for_models) if isfile(join(path_for_models, f))]
+    for h5_file in h5_file_list:
+        if h5_file == "Encoder_training.h5":
+            old_encoder = models.load_model(path_for_models + h5_file)
+            cvae_model.encoder.set_weights(weights=old_encoder.weights)
+        elif h5_file == "Decoder_training.h5":
+            old_decoder = models.load_model(path_for_models + h5_file)
+            cvae_model.decoder.set_weights(weights=old_decoder.weights)
+
     # Train Model according to the hyperparameters defines above
     print("-----Beginning Training-----")
+    loss = tf.keras.metrics.Mean()
+
     for epoch in range(1, epochs + 1):
         start_time = time.time()
-        print(f"Epoch: {epoch}\t Training: [", end='', flush=True)
+        print(f"Epoch: {epoch} Training:")
         for presentation_num, train_x in enumerate(train_gen):
-            if not presentation_num == 0:
-                if (presentations / presentation_num) % 10 == 0:
-                    print(f"-", end='', flush=True)
+            progbar(presentation_num, presentations, 20)
             if presentation_num == presentations:
-                print(f"]", end='', flush=True)
                 break
             train_step(cvae_model, train_x[0], optimizer)
+            cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
+            cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
         end_time = time.time()
 
-        loss = tf.keras.metrics.Mean()
         for presentation_num, val_x in enumerate(validation_gen):
+            progbar(presentation_num, presentations/100, 20)
             if presentation_num == (presentations/100):
                 break
             loss(compute_loss(cvae_model, val_x[0]))
