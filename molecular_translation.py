@@ -169,10 +169,11 @@ def data_generator(labels: list, folder_options: list,
                 yield image_data_array, output_string
 
 
-def progbar(curr, total, full_progbar):
+def progbar(curr, total, full_progbar, loss_val):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
-    print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
+    print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
+          '[Current Loss: {:>7.2%}]'.format(loss_val), end='')
 
 
 """
@@ -287,6 +288,7 @@ def train_step(model, x, optimizer):
         loss = compute_loss(model, x)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
+    return loss
 
 
 """
@@ -405,10 +407,10 @@ if __name__ == '__main__':
         start_time = time.time()
         print(f"Epoch: {epoch} Training:")
         for presentation_num, train_x in enumerate(train_gen):
-            progbar(presentation_num, presentations, 20)
             if presentation_num == presentations:
                 break
-            train_step(cvae_model, train_x[0], optimizer)
+            train_loss = train_step(cvae_model, train_x[0], optimizer)
+            progbar(presentation_num, presentations, 20, train_loss)
             cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
             cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
         end_time = time.time()
