@@ -1,15 +1,12 @@
 import csv
 import time
-import scipy
 import random
 import itertools
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
 from PIL import Image, ImageOps
 from IPython import display
-from scipy.ndimage import rotate
 from os import listdir
 from os.path import isfile, join
 from tensorflow import keras
@@ -278,22 +275,6 @@ def train_step(model, x, optimizer):
         loss = compute_loss(model, x)
     gradients = tape.gradient(loss, model.trainable_variables)
     optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-
-
-def generate_and_save_images(model, epoch, test_sample):
-    mean, logvar = model.encode(test_sample)
-    z = model.reparameterize(mean, logvar)
-    predictions = model.sample(z)
-    fig = plt.figure(figsize=(4, 4))
-
-    for i in range(predictions.shape[0]):
-        plt.subplot(4, 4, i + 1)
-        plt.imshow(predictions[i, :, :, 0], cmap='gray')
-        plt.axis('off')
-
-    # tight_layout minimizes the overlap between 2 sub-plots
-    plt.savefig('image_at_epoch_{:04d}.png'.format(epoch))
-    plt.show()
 
 
 """
