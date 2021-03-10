@@ -420,8 +420,7 @@ if __name__ == '__main__':
         end_time = time.time()
 
         for presentation_num, val_x in enumerate(validation_gen):
-            progbar(presentation_num, presentations/100, 20)
-            if presentation_num == (presentations/100):
+            if presentation_num == (presentations/10):
                 break
             loss(compute_loss(cvae_model, val_x[0]))
         elbo = -loss.result()
