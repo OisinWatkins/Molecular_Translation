@@ -115,7 +115,8 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
 
 
 def data_generator(labels: list, folder_options: list,
-                   dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\', augment_data: bool = True):
+                   dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\',
+                   batch_loop: int = 1, augment_data: bool = True):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -136,37 +137,41 @@ def data_generator(labels: list, folder_options: list,
             full_path = dataset_path + folder_path[0] + '\\' + folder_path[1] + '\\' + folder_path[2] + '\\'
             file_list = [f for f in listdir(full_path) if isfile(join(full_path, f))]
 
-            # Iterate through each file, preprocess and yield each
-            for file in file_list:
-                # Prepare Image augmentations
-                rand_translation_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
-                rand_translation_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
-                rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+            # Re-iterate over the same folder, shuffling the order each time
+            for batch_loop_num in range(batch_loop):
+                random.shuffle(file_list)
 
-                # Load image in Black and White with a constant size of 1500 x 1500
-                file_path = full_path + file
-                image_data = Image.open(file_path)
-                image_data = image_data.convert('1')
+                # Iterate through each file, preprocess and yield each
+                for file in file_list:
+                    # Prepare Image augmentations
+                    rand_trans_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
+                    rand_trans_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
+                    rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
 
-                if augment_data:
-                    # Perform Augmentation
-                    image_data = image_data.rotate(angle=rand_rotation,
-                                                   translate=(rand_translation_mag_vert, rand_translation_mag_horizontal),
-                                                   fillcolor=1,
-                                                   expand=True)
+                    # Load image in Black and White with a constant size of 1500 x 1500
+                    file_path = full_path + file
+                    image_data = Image.open(file_path)
+                    image_data = image_data.convert('1')
 
-                image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
-                image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
+                    if augment_data:
+                        # Perform Augmentation
+                        image_data = image_data.rotate(angle=rand_rotation,
+                                                       translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
+                                                       fillcolor=1,
+                                                       expand=True)
 
-                # Find the correct label from the csv file data
-                image_name = file[0:-4]
-                output_string = ''
-                for label in labels:
-                    if label[0] == image_name:
-                        output_string = label[1]
-                        break
+                    image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
+                    image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
 
-                yield image_data_array, output_string
+                    # Find the correct label from the csv file data
+                    image_name = file[0:-4]
+                    output_string = ''
+                    for label in labels:
+                        if label[0] == image_name:
+                            output_string = label[1]
+                            break
+
+                    yield image_data_array, image_name, output_string
 
 
 def progbar(curr, total, full_progbar, loss_val):
@@ -201,16 +206,17 @@ class CVAE(tf.keras.Model):
         self.latent_dim = latent_dim
 
         encoding_input = keras.Input(shape=input_shape)
-        encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
+        encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_input)
-        encoding_layer = layers.Conv2D(filters=128, kernel_size=3, strides=(2, 2), padding='same',
-                                       activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=64, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
-        encoding_layer = layers.Conv2D(filters=32, kernel_size=3, strides=(2, 2), padding='same',
+        encoding_layer = layers.Conv2D(filters=128, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
-        encoding_layer = layers.Conv2D(filters=16, kernel_size=3, strides=(2, 2), padding='same',
+        encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
+        encoding_layer = layers.Conv2D(filters=1024, kernel_size=3, strides=(2, 2), padding='same',
+                                       activation='relu')(encoding_layer)
+        encoding_layer = layers.Dense(512, activation='relu')(encoding_layer)
 
         shape_before_flattening = K.int_shape(encoding_layer)
         encoder_flatten = layers.Flatten()(encoding_layer)
@@ -221,15 +227,16 @@ class CVAE(tf.keras.Model):
         decoder_input = keras.Input(shape=(latent_dim,))
         decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
         decoder_layer = layers.Reshape(target_shape=shape_before_flattening[1:])(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=16, kernel_size=3, strides=2, padding='same',
+        decoder_layer = layers.Dense(512, activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=1024, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
-                                               activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=128, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
-        decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=2, padding='same',
+        decoder_layer = layers.Conv2DTranspose(filters=64, kernel_size=3, strides=2, padding='same',
+                                               activation='relu')(decoder_layer)
+        decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         # No activation
         decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
@@ -355,7 +362,7 @@ if __name__ == '__main__':
     print("\n-Testing Permutations ready")
 
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations)
+    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10)
     validation_gen = data_generator(training_labels, validation_folder_permutations)
     test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
     print("\n-Data Generators are ready")
@@ -366,12 +373,12 @@ if __name__ == '__main__':
     --------------------------------------------------------------------------------------------------------------------
     """
     # First, let's build a CVAE to handle feature extraction
-    optimizer = tf.keras.optimizers.Adam(1e-4)
+    optimizer = tf.keras.optimizers.Adam(1e-3)
 
     # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    epochs = 50000
-    presentations = 100
-    latent_dimension = 100
+    epochs = 10000
+    presentations = 500
+    latent_dimension = 200
     input_dimension = (1500, 1500, 1)
     print(f"\n-Training Hyperparameters:\n"
           f"\tEpochs: {epochs}\n"
