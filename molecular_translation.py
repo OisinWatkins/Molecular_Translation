@@ -1,7 +1,9 @@
 import os
+
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import csv
+import nltk
 import time
 import random
 import itertools
@@ -10,6 +12,7 @@ import tensorflow as tf
 import matplotlib.pyplot as plt
 
 import logging
+
 logging.getLogger('tensorflow').disabled = True
 
 from PIL import Image, ImageOps
@@ -19,7 +22,6 @@ from os.path import isfile, join
 from tensorflow import keras
 from tensorflow.keras import backend as K
 from tensorflow.keras import models, layers
-
 
 """
 ------------------------------------------------------------------------------------------------------------------------
@@ -117,7 +119,7 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
 
 def data_generator(labels: list, folder_options: list,
                    dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\',
-                   batch_loop: int = 1, augment_data: bool = True, invert_image: bool = False):
+                   batch_loop: int = 1, augment_data: bool = True, invert_image: bool = True, repeat_image: int = 1):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -144,46 +146,45 @@ def data_generator(labels: list, folder_options: list,
 
                 # Iterate through each file, preprocess and yield each
                 for file in file_list:
-                    # Prepare Image augmentations
-                    rand_trans_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
-                    rand_trans_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
-                    rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
+                    # Repeat each training input as many times as desired
+                    for repeat in range(repeat_image):
+                        # Prepare Image augmentations
+                        rand_trans_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
+                        rand_trans_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
+                        rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
 
-                    # Load image in Black and White with a constant size of 1500 x 1500
-                    file_path = full_path + file
-                    image_data = Image.open(file_path)
-                    
-                    bg_colour = 1
+                        # Load image in Black and White with a constant size of 1500 x 1500
+                        file_path = full_path + file
+                        image_data = Image.open(file_path)
 
-                    if invert_image:
-                        # Invert image colour
-                        image_data = ImageOps.invert(image_data)
-                        bg_colour = 0
+                        bg_colour = 1
 
-                    image_data = image_data.convert('1')
+                        if invert_image:
+                            # Invert image colour
+                            image_data = ImageOps.invert(image_data)
+                            bg_colour = 0
 
-                    if augment_data:
-                        # Perform Augmentation
-                        image_data = image_data.rotate(angle=rand_rotation,
-                                                       translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
-                                                       fillcolor=bg_colour,
-                                                       expand=True)
+                        image_data = image_data.convert('1')
 
-                    image_data = ImageOps.pad(image_data, (1500, 1500), color=bg_colour)
+                        if augment_data:
+                            # Perform Augmentation
+                            image_data = image_data.rotate(angle=rand_rotation,
+                                                           translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
+                                                           fillcolor=bg_colour,
+                                                           expand=True)
 
-                    plt.imshow(image_data)
-                    plt.show()
-                    image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
+                        image_data = ImageOps.pad(image_data, (1500, 1500), color=bg_colour)
+                        image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
 
-                    # Find the correct label from the csv file data
-                    image_name = file[0:-4]
-                    output_string = ''
-                    for label in labels:
-                        if label[0] == image_name:
-                            output_string = label[1]
-                            break
+                        # Find the correct label from the csv file data
+                        image_name = file[0:-4]
+                        output_string = ''
+                        for label in labels:
+                            if label[0] == image_name:
+                                output_string = label[1]
+                                break
 
-                    yield image_data_array, image_name, output_string
+                        yield image_data_array, image_name, output_string
 
 
 def progbar(curr, total, full_progbar, loss_val):
@@ -197,7 +198,6 @@ def progbar(curr, total, full_progbar, loss_val):
 ------------------------------------------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------------
 """
-
 
 """
 ------------------------------------------------------------------------------------------------------------------------
@@ -226,9 +226,9 @@ class CVAE(tf.keras.Model):
                                        activation='relu')(encoding_layer)
         encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
-        encoding_layer = layers.Conv2D(filters=1024, kernel_size=3, strides=(2, 2), padding='same',
+        encoding_layer = layers.Conv2D(filters=512, kernel_size=3, strides=(2, 2), padding='same',
                                        activation='relu')(encoding_layer)
-        encoding_layer = layers.Dense(512, activation='relu')(encoding_layer)
+        encoding_layer = layers.Dense(1024, activation='relu')(encoding_layer)
 
         shape_before_flattening = K.int_shape(encoding_layer)
         encoder_flatten = layers.Flatten()(encoding_layer)
@@ -239,7 +239,7 @@ class CVAE(tf.keras.Model):
         decoder_input = keras.Input(shape=(latent_dim,))
         decoder_layer = layers.Dense(units=np.prod(shape_before_flattening[1:]), activation=tf.nn.relu)(decoder_input)
         decoder_layer = layers.Reshape(target_shape=shape_before_flattening[1:])(decoder_layer)
-        decoder_layer = layers.Dense(512, activation='relu')(decoder_layer)
+        decoder_layer = layers.Dense(1024, activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=1024, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         decoder_layer = layers.Conv2DTranspose(filters=512, kernel_size=3, strides=2, padding='same',
@@ -251,8 +251,7 @@ class CVAE(tf.keras.Model):
         decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         # No activation
-        decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same',
-                                                activation='sigmoid')(decoder_layer)
+        decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
         decoder_output = layers.Cropping2D(cropping=((2, 2), (2, 2)))(decoder_output)
         self.decoder = models.Model(decoder_input, decoder_output, name='Decoder')
 
@@ -311,11 +310,137 @@ def train_step(model, x, optimizer):
     return loss
 
 
+def build_and_train_cvae(lr=1e-4, epochs=10000, presentations=600, latent_dimension=250,
+                         input_dimension=(1500, 1500, 1)):
+    # First, let's build a CVAE to handle feature extraction
+    optimizer = tf.keras.optimizers.Adam(lr)
+
+    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
+    print(f"\n-Training Hyperparameters:\n"
+          f"\tEpochs: {epochs}\n"
+          f"\tPresentations per epoch: {presentations}\n"
+          f"\tLatent Dimensions: {latent_dimension}\n")
+
+    # Instantiate CVAE Model
+    cvae_model = CVAE(latent_dimension, input_dimension)
+
+    # Provide Summary for Encoder and Decoder Models
+    print("\n\n")
+    cvae_model.encoder.summary()
+    print("\n\n")
+    cvae_model.decoder.summary()
+    print("\n\n")
+
+    # Train Model according to the hyperparameters defines above
+    print("-----Beginning Training-----")
+    loss = tf.keras.metrics.Mean()
+
+    for epoch in range(1, epochs + 1):
+        start_time = time.time()
+        print(f"Epoch: {epoch} Training:")
+        for presentation_num, train_x in enumerate(train_gen):
+            if presentation_num == presentations:
+                break
+            train_loss = train_step(cvae_model, train_x[0], optimizer)
+            progbar(presentation_num, presentations, 20, train_loss)
+            cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
+            cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
+        end_time = time.time()
+
+        for presentation_num, val_x in enumerate(validation_gen):
+            if presentation_num == (presentations / 10):
+                break
+            loss(compute_loss(cvae_model, val_x[0]))
+        elbo = -loss.result()
+        display.clear_output(wait=False)
+        print(f"\tValidation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
+
+    # Save each model before continuing
+    cvae_model.encoder.save('Encoder.h5')
+    cvae_model.decoder.save('Decoder.h5')
+
+
 """
 ------------------------------------------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------------------------------------------
 """
 
+"""
+------------------------------------------------------------------------------------------------------------------------
+This section is devoted to the InChI Text Generation model
+------------------------------------------------------------------------------------------------------------------------
+"""
+
+
+def build_and_train_text_gen(len_encoded_str, lr=1e-4, epochs=10000, presentations=600):
+    optimizer = tf.keras.optimizers.Adam(lr)
+
+    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
+    print(f"\n-Training Hyperparameters:\n"
+          f"\tEpochs: {epochs}\n"
+          f"\tPresentations per epoch: {presentations}\n")
+
+    # First: let's build the Image Processing head of the model
+    image_input_dimension = (1500, 1500, 1)
+    image_processing_head = keras.Input(shape=image_input_dimension)
+    image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2),
+                                                   activation='relu')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2),
+                                                   activation='relu')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2),
+                                                   activation='relu')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2),
+                                                   activation='relu')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2),
+                                                   activation='relu')(image_processing_head)
+
+    # Second: let's build the Encoded String input handling head
+    str_input_dimension = (300, len_encoded_str)
+    str_processing_head = keras.Input(shape=str_input_dimension)
+    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(str_processing_head)
+    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(str_processing_head)
+    str_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(str_processing_head)
+
+    # Third: let's build the Encoded Number input handling head
+    num_input_dimension = (300, 1)
+    num_processing_head = keras.Input(shape=num_input_dimension)
+    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(num_processing_head)
+    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(num_processing_head)
+    num_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='same', activation='relu',
+                                                 data_format='channels_last')(num_processing_head)
+
+    # Fourth: Concatenate the String and Number processed outputs
+    combined_name_input = layers.Concatenate([str_processing_head, num_processing_head], axis=-1)
+    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='same', activation='relu',
+                                                     data_format='channels_last')(combined_name_input)
+    combined_name_processed = layers.SeparableConv1D(filters=512, kernel_size=3, padding='same', activation='relu',
+                                                     data_format='channels_last')(combined_name_processed)
+
+    # Fifth: Join outputs from the input heads and process into encoded strings
+    inchi_name_gen_model = models.Model()
+
+    print("-----Beginning Training-----")
+    for epoch in range(1, epochs + 1):
+        start_time = time.time()
+        print(f"Epoch: {epoch} Training:")
+        for presentation_num, train_x in enumerate(train_gen):
+            if presentation_num == presentations:
+                break
+
+        for presentation_num, val_x in enumerate(validation_gen):
+            if presentation_num == (presentations / 10):
+                break
+
+
+"""
+------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
+"""
 
 if __name__ == '__main__':
     """
@@ -331,6 +456,7 @@ if __name__ == '__main__':
         csv_reader = csv.reader(csv_file, delimiter=',')
         for row in csv_reader:
             codex = row
+    codex_len = len(codex)
     print("\n-Codex has been loaded")
 
     # Grab all Training Labels used for this dataset
@@ -375,9 +501,9 @@ if __name__ == '__main__':
     print("\n-Testing Permutations ready")
 
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10, invert_image=True)
+    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10)
     validation_gen = data_generator(training_labels, validation_folder_permutations, invert_image=True)
-    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False, invert_image=True)
+    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
     print("\n-Data Generators are ready")
 
     """
@@ -385,72 +511,20 @@ if __name__ == '__main__':
     Now building and training CVAE
     --------------------------------------------------------------------------------------------------------------------
     """
-    # First, let's build a CVAE to handle feature extraction
-    optimizer = tf.keras.optimizers.Adam(1e-4)
+    # build_and_train_cvae()
+    """
+    --------------------------------------------------------------------------------------------------------------------
+    CVAE Built and Saved
+    --------------------------------------------------------------------------------------------------------------------
+    """
 
-    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    epochs = 10000
-    presentations = 500
-    latent_dimension = 200
-    input_dimension = (1500, 1500, 1)
-    print(f"\n-Training Hyperparameters:\n"
-          f"\tEpochs: {epochs}\n"
-          f"\tPresentations per epoch: {presentations}\n"
-          f"\tLatent Dimensions: {latent_dimension}\n")
-
-    # Instantiate CVAE Model
-    cvae_model = CVAE(latent_dimension, input_dimension)
-
-    # Provide Summary for Encoder and Decoder Models
-    print("\n\n")
-    cvae_model.encoder.summary()
-    print("\n\n")
-    cvae_model.decoder.summary()
-    print("\n\n")
-
-    # Load previous training models
-    # print("-Loading Previous Model\n")
-    # path_for_models = "D:\\AI Projects\\Molecular_Translation Models\\"
-    # h5_file_list = [f for f in listdir(path_for_models) if isfile(join(path_for_models, f))]
-    # for h5_file in h5_file_list:
-    #     if h5_file == "Encoder_training.h5":
-    #         old_encoder = models.load_model(path_for_models + h5_file)
-    #         print(old_encoder.weights)
-    #         cvae_model.encoder.set_weights(weights=old_encoder.weights)
-    #     elif h5_file == "Decoder_training.h5":
-    #         old_decoder = models.load_model(path_for_models + h5_file)
-    #         print(old_decoder.weights)
-    #         cvae_model.decoder.set_weights(weights=old_decoder.weights)
-    # print("-Previous Model Loaded\n")
-
-    # Train Model according to the hyperparameters defines above
-    print("-----Beginning Training-----")
-    loss = tf.keras.metrics.Mean()
-
-    for epoch in range(1, epochs + 1):
-        start_time = time.time()
-        print(f"Epoch: {epoch} Training:")
-        for presentation_num, train_x in enumerate(train_gen):
-            if presentation_num == presentations:
-                break
-            train_loss = train_step(cvae_model, train_x[0], optimizer)
-            progbar(presentation_num, presentations, 20, train_loss)
-            cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
-            cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
-        end_time = time.time()
-
-        for presentation_num, val_x in enumerate(validation_gen):
-            if presentation_num == (presentations/10):
-                break
-            loss(compute_loss(cvae_model, val_x[0]))
-        elbo = -loss.result()
-        display.clear_output(wait=False)
-        print(f"\tValidation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
-
-    # Save each model before continuing
-    cvae_model.encoder.save('Encoder.h5')
-    cvae_model.decoder.save('Decoder.h5')
-
+    """
+    --------------------------------------------------------------------------------------------------------------------
+    Now building and training InChI String Generation Model
+    --------------------------------------------------------------------------------------------------------------------
+    """
+    str_padding_len = 300
+    build_and_train_text_gen(len_encoded_str=codex_len)
     """
     --------------------------------------------------------------------------------------------------------------------
     CVAE Built and Saved
