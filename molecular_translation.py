@@ -152,20 +152,24 @@ def data_generator(labels: list, folder_options: list,
                     # Load image in Black and White with a constant size of 1500 x 1500
                     file_path = full_path + file
                     image_data = Image.open(file_path)
+                    
+                    bg_colour = 1
+
+                    if invert_image:
+                        # Invert image colour
+                        image_data = ImageOps.invert(image_data)
+                        bg_colour = 0
+
                     image_data = image_data.convert('1')
 
                     if augment_data:
                         # Perform Augmentation
                         image_data = image_data.rotate(angle=rand_rotation,
                                                        translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
-                                                       fillcolor=1,
+                                                       fillcolor=bg_colour,
                                                        expand=True)
 
-                    image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
-
-                    if invert_image:
-                        # Invert image colour
-                        image_data = ImageOps.invert(image_data)
+                    image_data = ImageOps.pad(image_data, (1500, 1500), color=bg_colour)
 
                     plt.imshow(image_data)
                     plt.show()
