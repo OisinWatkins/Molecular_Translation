@@ -7,6 +7,7 @@ import random
 import itertools
 import numpy as np
 import tensorflow as tf
+import matplotlib.pyplot as plt
 
 import logging
 logging.getLogger('tensorflow').disabled = True
@@ -116,7 +117,7 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
 
 def data_generator(labels: list, folder_options: list,
                    dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\',
-                   batch_loop: int = 1, augment_data: bool = True):
+                   batch_loop: int = 1, augment_data: bool = True, invert_image: bool = False):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -161,6 +162,13 @@ def data_generator(labels: list, folder_options: list,
                                                        expand=True)
 
                     image_data = ImageOps.pad(image_data, (1500, 1500), color=1)
+
+                    if invert_image:
+                        # Invert image colour
+                        image_data = ImageOps.invert(image_data)
+
+                    plt.imshow(image_data)
+                    plt.show()
                     image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
 
                     # Find the correct label from the csv file data
@@ -239,7 +247,8 @@ class CVAE(tf.keras.Model):
         decoder_layer = layers.Conv2DTranspose(filters=32, kernel_size=3, strides=2, padding='same',
                                                activation='relu')(decoder_layer)
         # No activation
-        decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same')(decoder_layer)
+        decoder_output = layers.Conv2DTranspose(filters=1, kernel_size=3, strides=1, padding='same',
+                                                activation='sigmoid')(decoder_layer)
         decoder_output = layers.Cropping2D(cropping=((2, 2), (2, 2)))(decoder_output)
         self.decoder = models.Model(decoder_input, decoder_output, name='Decoder')
 
@@ -362,9 +371,9 @@ if __name__ == '__main__':
     print("\n-Testing Permutations ready")
 
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10)
-    validation_gen = data_generator(training_labels, validation_folder_permutations)
-    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
+    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10, invert_image=True)
+    validation_gen = data_generator(training_labels, validation_folder_permutations, invert_image=True)
+    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False, invert_image=True)
     print("\n-Data Generators are ready")
 
     """
@@ -373,7 +382,7 @@ if __name__ == '__main__':
     --------------------------------------------------------------------------------------------------------------------
     """
     # First, let's build a CVAE to handle feature extraction
-    optimizer = tf.keras.optimizers.Adam(1e-3)
+    optimizer = tf.keras.optimizers.Adam(1e-4)
 
     # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
     epochs = 10000
