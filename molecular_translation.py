@@ -81,7 +81,7 @@ def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300)
 
     # No pad the encoded InChI identifier with empty characters
     if len(encoded_name) < padded_size:
-        for extra_i in range(100 - len(encoded_name)):
+        for extra_i in range(padded_size - len(encoded_name)):
             encoded_name.append([encoded_empty, [0.0]])
 
     return encoded_name
@@ -112,7 +112,12 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
             continue
         # Otherwise concatenate the value in the codex at that given index
         else:
-            inchi_name = inchi_name + codex_list[encoded_character[0].index(1.0)]
+            try:
+                # Attempt to decode the value provided
+                inchi_name = inchi_name + codex_list[encoded_character[0].index(1.0)]
+            except:
+                # If it doesn't work, move on
+                continue
 
     return inchi_name
 
@@ -187,11 +192,14 @@ def data_generator(labels: list, folder_options: list,
                         yield image_data_array, image_name, output_string
 
 
-def progbar(curr, total, full_progbar, loss_val):
+def progbar(curr, total, full_progbar, loss_val_1=None, loss_val_2=None):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
-    print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
-          '[Current Loss: {:>7.2}]'.format(loss_val), end='')
+    if loss_val_1 is not None and loss_val_2 is not None:
+        print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
+              '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
+    else:
+        print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
 
 
 """
@@ -310,16 +318,9 @@ def train_step(model, x, optimizer):
     return loss
 
 
-def build_and_train_cvae(lr=1e-4, epochs=10000, presentations=600, latent_dimension=250,
-                         input_dimension=(1500, 1500, 1)):
+def build_and_train_cvae(lr=1e-4, latent_dimension=250, input_dimension=(1500, 1500, 1)):
     # First, let's build a CVAE to handle feature extraction
     optimizer = tf.keras.optimizers.Adam(lr)
-
-    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    print(f"\n-Training Hyperparameters:\n"
-          f"\tEpochs: {epochs}\n"
-          f"\tPresentations per epoch: {presentations}\n"
-          f"\tLatent Dimensions: {latent_dimension}\n")
 
     # Instantiate CVAE Model
     cvae_model = CVAE(latent_dimension, input_dimension)
@@ -331,33 +332,7 @@ def build_and_train_cvae(lr=1e-4, epochs=10000, presentations=600, latent_dimens
     cvae_model.decoder.summary()
     print("\n\n")
 
-    # Train Model according to the hyperparameters defines above
-    print("-----Beginning Training-----")
-    loss = tf.keras.metrics.Mean()
-
-    for epoch in range(1, epochs + 1):
-        start_time = time.time()
-        print(f"Epoch: {epoch} Training:")
-        for presentation_num, train_x in enumerate(train_gen):
-            if presentation_num == presentations:
-                break
-            train_loss = train_step(cvae_model, train_x[0], optimizer)
-            progbar(presentation_num, presentations, 20, train_loss)
-            cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
-            cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
-        end_time = time.time()
-
-        for presentation_num, val_x in enumerate(validation_gen):
-            if presentation_num == (presentations / 10):
-                break
-            loss(compute_loss(cvae_model, val_x[0]))
-        elbo = -loss.result()
-        display.clear_output(wait=False)
-        print(f"\tValidation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
-
-    # Save each model before continuing
-    cvae_model.encoder.save('Encoder.h5')
-    cvae_model.decoder.save('Decoder.h5')
+    return cvae_model
 
 
 """
@@ -372,69 +347,97 @@ This section is devoted to the InChI Text Generation model
 """
 
 
-def build_and_train_text_gen(len_encoded_str, lr=1e-4, epochs=10000, presentations=600):
-    optimizer = tf.keras.optimizers.Adam(lr)
-
-    # Enough Epochs and Presentations per Epoch to reach 2,424,186 total presentations at least once over
-    print(f"\n-Training Hyperparameters:\n"
-          f"\tEpochs: {epochs}\n"
-          f"\tPresentations per epoch: {presentations}\n")
+def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
-    image_processing_head = keras.Input(shape=image_input_dimension)
-    image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2),
-                                                   activation='relu')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2),
-                                                   activation='relu')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2),
-                                                   activation='relu')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2),
-                                                   activation='relu')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2),
-                                                   activation='relu')(image_processing_head)
+    image_processing_head_input = keras.Input(shape=image_input_dimension)
+    image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Image_Processing_Conv2D_1')(image_processing_head_input)
+    image_processing_head = layers.MaxPool2D(pool_size=(2, 2),
+                                             name='Image_Processing_MaxPool2D_1')(image_processing_head)
+    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_1')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Image_Processing_Conv2D_2')(image_processing_head)
+    image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
+                                                name='Image_Processing_MaxPool2D_2')(image_processing_head)
+    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_2')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Image_Processing_Conv2D_3')(image_processing_head)
+    image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
+                                                name='Image_Processing_MaxPool2D_3')(image_processing_head)
+    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_3')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Image_Processing_Conv2D_4')(image_processing_head)
+    image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
+                                                name='Image_Processing_MaxPool2D_4')(image_processing_head)
+    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_4')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Image_Processing_Conv2D_5')(image_processing_head)
+    image_processing_head = layers.Flatten(name='Image_Processing_Flatten')(image_processing_head)
 
     # Second: let's build the Encoded String input handling head
-    str_input_dimension = (300, len_encoded_str)
-    str_processing_head = keras.Input(shape=str_input_dimension)
-    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(str_processing_head)
-    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(str_processing_head)
-    str_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(str_processing_head)
+    str_input_dimension = (len_padded_str, len_encoded_str)
+    str_processing_head_input = keras.Input(shape=str_input_dimension)
+    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Str_Processing_Conv1d_1')(str_processing_head_input)
+    str_processing_head = layers.MaxPooling1D(pool_size=2, name='Str_Processing_MaxPool1D_1')(str_processing_head)
+    str_processing_head = layers.Dropout(0.1, name='Str_Processing_Dropout_1')(str_processing_head)
+    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Str_Processing_Conv1d_2')(str_processing_head)
+    str_processing_head = layers.MaxPooling1D(pool_size=2, name='Str_Processing_MaxPool1D_2')(str_processing_head)
+    str_processing_head = layers.Dropout(0.1, name='Str_Processing_Dropout_2')(str_processing_head)
+    str_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Str_Processing_Conv1d_3')(str_processing_head)
 
     # Third: let's build the Encoded Number input handling head
-    num_input_dimension = (300, 1)
-    num_processing_head = keras.Input(shape=num_input_dimension)
-    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(num_processing_head)
-    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(num_processing_head)
-    num_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='same', activation='relu',
-                                                 data_format='channels_last')(num_processing_head)
+    num_input_dimension = (len_padded_str, 1)
+    num_processing_head_input = keras.Input(shape=num_input_dimension)
+    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Num_Processing_Conv1d_1')(num_processing_head_input)
+    num_processing_head = layers.MaxPooling1D(pool_size=2, name='Num_Processing_MaxPool1D_1')(num_processing_head)
+    num_processing_head = layers.Dropout(0.1, name='Num_Processing_Dropout_1')(num_processing_head)
+    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Num_Processing_Conv1d_2')(num_processing_head)
+    num_processing_head = layers.MaxPooling1D(pool_size=2, name='Num_Processing_MaxPool1D_2')(num_processing_head)
+    num_processing_head = layers.Dropout(0.1, name='Num_Processing_Dropout_2')(num_processing_head)
+    num_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='valid', activation='relu',
+                                                 name='Num_Processing_Conv1d_3')(num_processing_head)
 
     # Fourth: Concatenate the String and Number processed outputs
-    combined_name_input = layers.Concatenate([str_processing_head, num_processing_head], axis=-1)
-    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='same', activation='relu',
-                                                     data_format='channels_last')(combined_name_input)
-    combined_name_processed = layers.SeparableConv1D(filters=512, kernel_size=3, padding='same', activation='relu',
-                                                     data_format='channels_last')(combined_name_processed)
+    combined_name_input = tf.concat([str_processing_head, num_processing_head], -1)
+    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='valid', activation='relu',
+                                                     name='Combined_Name_Conv1d_1')(combined_name_input)
+    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='valid', activation='relu',
+                                                     name='Combined_Name_Conv1d_2')(combined_name_processed)
+    combined_name_processed = layers.Flatten(name='Combined_Name_Flatten')(combined_name_processed)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
-    inchi_name_gen_model = models.Model()
+    inchi_name_input = tf.concat([image_processing_head, combined_name_processed], -1)
 
-    print("-----Beginning Training-----")
-    for epoch in range(1, epochs + 1):
-        start_time = time.time()
-        print(f"Epoch: {epoch} Training:")
-        for presentation_num, train_x in enumerate(train_gen):
-            if presentation_num == presentations:
-                break
+    inchi_name_output = layers.Dense(units=512, activation='relu', name='InChI_Name_Processing_Dense')(inchi_name_input)
 
-        for presentation_num, val_x in enumerate(validation_gen):
-            if presentation_num == (presentations / 10):
-                break
+    # Sixth: Define each output tail and compile the model
+    inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='sigmoid',
+                                         name='InChI_Name_Str_Processing_Dense')(inchi_name_output)
+
+    inchi_name_output_num = layers.Dense(units=1, name='InChI_Name_Num_Processing_Dense')(inchi_name_output)
+
+    inchi_name_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
+                                    outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
+
+    optimizer = tf.keras.optimizers.Adam(lr)
+    losses = {
+        'InChI_Name_Str_Processing_Dense': tf.losses.BinaryCrossentropy(),
+        'InChI_Name_Num_Processing_Dense': tf.losses.MeanSquaredError()
+    }
+    losses_weights = {"InChI_Name_Str_Processing_Dense": 1.0, "InChI_Name_Num_Processing_Dense": 1.0}
+    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
+    print("\n\n")
+    inchi_name_model.summary()
+    print("\n\n")
+
+    return inchi_name_model
 
 
 """
@@ -500,9 +503,11 @@ if __name__ == '__main__':
         testing_folder_permutations[i] = ['f', testing_folder_permutations[i][0], testing_folder_permutations[i][1]]
     print("\n-Testing Permutations ready")
 
+    str_padding_len = 300
+
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=10)
-    validation_gen = data_generator(training_labels, validation_folder_permutations, invert_image=True)
+    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=1, repeat_image=str_padding_len)
+    validation_gen = data_generator(training_labels, validation_folder_permutations)
     test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
     print("\n-Data Generators are ready")
 
@@ -511,7 +516,35 @@ if __name__ == '__main__':
     Now building and training CVAE
     --------------------------------------------------------------------------------------------------------------------
     """
-    # build_and_train_cvae()
+    # cvae_model = build_and_train_cvae()
+
+    # # Train Model according to the hyperparameters defines above
+    # print("-----Beginning Training-----")
+    # loss = tf.keras.metrics.Mean()
+    #
+    # for epoch in range(1, epochs + 1):
+    #     start_time = time.time()
+    #     print(f"Epoch: {epoch} Training:")
+    #     for presentation_num, train_x in enumerate(train_gen):
+    #         if presentation_num == presentations:
+    #             break
+    #         train_loss = train_step(cvae_model, train_x[0], optimizer)
+    #         progbar(presentation_num, presentations, 20, train_loss)
+    #         cvae_model.encoder.save('Encoder_training.h5', overwrite=True)
+    #         cvae_model.decoder.save('Decoder_training.h5', overwrite=True)
+    #     end_time = time.time()
+    #
+    #     for presentation_num, val_x in enumerate(validation_gen):
+    #         if presentation_num == (presentations / 10):
+    #             break
+    #         loss(compute_loss(cvae_model, val_x[0]))
+    #     elbo = -loss.result()
+    #     display.clear_output(wait=False)
+    #     print(f"\tValidation set ELBO: {elbo}\tTime elapse for current epoch: {end_time - start_time}")
+    #
+    # # Save each model before continuing
+    # cvae_model.encoder.save('Encoder.h5')
+    # cvae_model.decoder.save('Decoder.h5')
     """
     --------------------------------------------------------------------------------------------------------------------
     CVAE Built and Saved
@@ -523,8 +556,110 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    str_padding_len = 300
-    build_and_train_text_gen(len_encoded_str=codex_len)
+    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+
+    epochs = 10000
+    presentations = 600
+
+    print(f"\n-Training Hyperparameters:\n"
+          f"\tEpochs: {epochs}\n"
+          f"\tPresentations per epoch: {presentations}\n")
+
+    print("-----Beginning Training-----")
+    best_validation_loss = 300
+    for epoch in range(1, epochs + 1):
+        print(f"Epoch: {epoch} Training:")
+
+        # Train for the given number of presentations
+        for presentation_num in range(presentations):
+            # str_start_val is used to "cut out" the first however many characters in the InChI name, as all names
+            # share the same beginning. These initial characters will be used as the initial seed for the Model
+            str_start_val = 9
+            for step in range(str_padding_len-9):
+                # Grab training inputs from the Training Generator
+                train_image_in, image_file_name, inchi_str = next(train_gen)
+
+                # Encode the InChI string and extract the Seed value for training and the desired output value for
+                # that seed
+                encoded_name = encode_inchi_name(inchi_str, codex)
+                seed_input_full = encoded_name[0:str_start_val]
+                output_char = encoded_name[str_start_val]
+
+                # Now decode and re-encode the seed value to get the desired padding of empty characters
+                seed_input_as_str = decode_inchi_name(seed_input_full, codex)
+                seed_input = encode_inchi_name(seed_input_as_str, codex)
+
+                # Extract all encoded Str and Num information seperately.
+                seed_input_str = []
+                seed_input_num = []
+                for value in seed_input:
+                    seed_input_str.append(value[0])
+                    seed_input_num.append(value[1])
+
+                # Cast them to Numpy arrays with the correct shapes
+                seed_input_str = np.array(seed_input_str).reshape((1, str_padding_len, len(codex)+1))
+                seed_input_num = np.array(seed_input_num).reshape((1, str_padding_len, 1))
+
+                # Cast the outputs to Numpy arrays with the correct shapes
+                output_char_str = np.array(output_char[0]).reshape((1, len(codex)+1))
+                output_char_num = np.array(output_char[1]).reshape((1, 1))
+
+                # Train the model for just 1 input
+                history = inchi_model.fit(x=[train_image_in, seed_input_str, seed_input_num],
+                                          y=[output_char_str, output_char_num], batch_size=1, epochs=1, verbose=0)
+
+                progbar(step, str_padding_len-9, 20,
+                        loss_val_1=history.history['InChI_Name_Str_Processing_Dense_loss'][0],
+                        loss_val_2=history.history['InChI_Name_Num_Processing_Dense_loss'][0])
+
+                str_start_val += 1
+
+        # Perform Validation
+        for presentation_num in range(int(presentations/10)):
+            # Grab the output from the Validation Generator
+            val_image_in, val_image_file_name, val_inchi_str = next(validation_gen)
+
+            # Encode, splice, decode and re-encode the InChI name for the seed value
+            val_encoded_name = encode_inchi_name(val_inchi_str, codex)
+            val_seed_input_full = val_encoded_name[0:9]
+            val_seed_input_as_str = decode_inchi_name(val_seed_input_full, codex)
+            val_seed_input = encode_inchi_name(val_seed_input_as_str, codex)
+
+            # Extract the Str and Num encodings separately
+            val_seed_input_str = []
+            val_seed_input_num = []
+            for value in val_seed_input:
+                val_seed_input_str.append(value[0])
+                val_seed_input_num.append(value[1])
+
+            # Store the seed inputs as Numpy arrays
+            val_seed_input_str = np.array(val_seed_input_str).reshape((1, str_padding_len, len(codex)+1))
+            val_seed_input_num = np.array(val_seed_input_num).reshape((1, str_padding_len, 1))
+
+            # Placeholder for the model's generated output
+            generated_output = []
+
+            # Iterate for as long as is required to generate the correct length of string
+            for step in range(str_padding_len-9):
+                # Predict the next character from the model
+                val_output_char = inchi_model.predict(x=[val_image_in, val_seed_input_str, val_seed_input_num])
+
+                # Append he next character to the generated output
+                generated_output.append(val_output_char)
+
+                # Replace the latest character in the seed with the generated character
+                val_seed_input[step+9] = val_output_char
+
+            predicted_inchi = decode_inchi_name(generated_output, codex)
+            validation_loss = nltk.edit_distance(predicted_inchi, val_inchi_str)
+
+            progbar(presentation_num, int(presentations/10), 20, loss_val=validation_loss)
+
+            if validation_loss < best_validation_loss:
+                inchi_model.save("InChI_Model_Best_Val.h5", overwrite=True)
+                best_validation_loss = validation_loss
+
+
     """
     --------------------------------------------------------------------------------------------------------------------
     CVAE Built and Saved
