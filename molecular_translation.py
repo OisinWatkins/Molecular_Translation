@@ -192,12 +192,12 @@ def data_generator(labels: list, folder_options: list,
                         yield image_data_array, image_name, output_string
 
 
-def progbar(curr, total, full_progbar, loss_val_1=None, loss_val_2=None):
+def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None, loss_val_2=None):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
-    if loss_val_1 is not None and loss_val_2 is not None:
+    if curr_presentation_num is not None and total_presentations is not None and loss_val_1 is not None and loss_val_2 is not None:
         print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
-              '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
+              f'[Current Presentation: {curr_presentation_num}/{total_presentations}]', '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
     else:
         print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
 
@@ -431,7 +431,7 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
         'InChI_Name_Str_Processing_Dense': tf.losses.BinaryCrossentropy(),
         'InChI_Name_Num_Processing_Dense': tf.losses.MeanSquaredError()
     }
-    losses_weights = {"InChI_Name_Str_Processing_Dense": 1.0, "InChI_Name_Num_Processing_Dense": 1.0}
+    losses_weights = {"InChI_Name_Str_Processing_Dense": 1.0, "InChI_Name_Num_Processing_Dense": 0.01}
     inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
     print("\n\n")
     inchi_name_model.summary()
@@ -556,7 +556,7 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-5)
 
     epochs = 10000
     presentations = 600
@@ -572,18 +572,19 @@ if __name__ == '__main__':
 
         # Train for the given number of presentations
         for presentation_num in range(presentations):
-            # str_start_val is used to "cut out" the first however many characters in the InChI name, as all names
-            # share the same beginning. These initial characters will be used as the initial seed for the Model
-            str_start_val = 9
-            for step in range(str_padding_len-9):
+            # str_start_val is used to "cut out" the first however many characters in the InChI name. This cut out
+            # section will be randomised to prevent the model from only predicting empty values.
+            str_start_val = list(range(str_padding_len))
+            random.shuffle(str_start_val)
+            for step, start_val in enumerate(str_start_val):
                 # Grab training inputs from the Training Generator
                 train_image_in, image_file_name, inchi_str = next(train_gen)
 
                 # Encode the InChI string and extract the Seed value for training and the desired output value for
                 # that seed
                 encoded_name = encode_inchi_name(inchi_str, codex)
-                seed_input_full = encoded_name[0:str_start_val]
-                output_char = encoded_name[str_start_val]
+                seed_input_full = encoded_name[0:start_val]
+                output_char = encoded_name[start_val]
 
                 # Now decode and re-encode the seed value to get the desired padding of empty characters
                 seed_input_as_str = decode_inchi_name(seed_input_full, codex)
@@ -608,14 +609,18 @@ if __name__ == '__main__':
                 history = inchi_model.fit(x=[train_image_in, seed_input_str, seed_input_num],
                                           y=[output_char_str, output_char_num], batch_size=1, epochs=1, verbose=0)
 
-                progbar(step, str_padding_len-9, 20,
+                inchi_model.save("InChI_Model_Current_Train.h5", overwrite=True)
+
+                progbar(step, len(str_start_val), 20,
+                        curr_presentation_num=presentation_num+1,
+                        total_presentations=presentations,
                         loss_val_1=history.history['InChI_Name_Str_Processing_Dense_loss'][0],
                         loss_val_2=history.history['InChI_Name_Num_Processing_Dense_loss'][0])
 
-                str_start_val += 1
-
         # Perform Validation
         for presentation_num in range(int(presentations/10)):
+            progbar(presentation_num, int(presentations/10), 20)
+
             # Grab the output from the Validation Generator
             val_image_in, val_image_file_name, val_inchi_str = next(validation_gen)
 
@@ -652,8 +657,6 @@ if __name__ == '__main__':
 
             predicted_inchi = decode_inchi_name(generated_output, codex)
             validation_loss = nltk.edit_distance(predicted_inchi, val_inchi_str)
-
-            progbar(presentation_num, int(presentations/10), 20, loss_val=validation_loss)
 
             if validation_loss < best_validation_loss:
                 inchi_model.save("InChI_Model_Best_Val.h5", overwrite=True)
