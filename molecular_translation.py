@@ -662,6 +662,8 @@ if __name__ == '__main__':
                 inchi_model.save("InChI_Model_Best_Val.h5", overwrite=True)
                 best_validation_loss = validation_loss
 
+    inchi_model.save("InChI_Model.h5")
+
 
     """
     --------------------------------------------------------------------------------------------------------------------
