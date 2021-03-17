@@ -560,14 +560,18 @@ if __name__ == '__main__':
     inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=5e-6)
 
     epochs = 10000
+    patience = 10
+    patience_orig = 10
     presentations = 600
 
     print(f"\n-Training Hyperparameters:\n"
           f"\tEpochs: {epochs}\n"
           f"\tPresentations per epoch: {presentations}\n"
+          f"\tTraining Patience: {patience}"
           f"\tRepetitions per Image: {num_repeat_image}\n")
 
     print("-----Beginning Training-----")
+    old_val_loss = 0
     for epoch in range(1, epochs + 1):
         print(f"Epoch: {epoch} Training:")
 
@@ -691,6 +695,20 @@ if __name__ == '__main__':
         mean_levenstein_dist = validation_loss / int(presentations/10)
         print('\r', '#' * 20, f"[ {100.00}%]",
               f'[Mean Levenstein Distance during Validation: {mean_levenstein_dist}]')
+
+        # Handle Training Patience if not on the first epoch
+        if not epoch == 1:
+            # If the validation performance has degraded w.r.t the last epoch, deduct from patience
+            if mean_levenstein_dist > old_val_loss:
+                patience -= 1
+
+            # Else add to patience up to a maximum of the original patience val
+            else:
+                if not patience == patience_orig:
+                    patience += 1
+
+        # Pass on the new val loss
+        old_val_loss = mean_levenstein_dist
 
     inchi_model.save("InChI_Model.h5")
 
