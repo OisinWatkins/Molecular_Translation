@@ -504,9 +504,10 @@ if __name__ == '__main__':
     print("\n-Testing Permutations ready")
 
     str_padding_len = 300
+    num_repeat_image = 6
 
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=1, repeat_image=str_padding_len)
+    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=1, repeat_image=num_repeat_image)
     validation_gen = data_generator(training_labels, validation_folder_permutations)
     test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
     print("\n-Data Generators are ready")
@@ -556,7 +557,7 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-5)
+    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=5e-6)
 
     epochs = 10000
     presentations = 600
@@ -566,17 +567,36 @@ if __name__ == '__main__':
           f"\tPresentations per epoch: {presentations}\n")
 
     print("-----Beginning Training-----")
-    best_validation_loss = 300
     for epoch in range(1, epochs + 1):
         print(f"Epoch: {epoch} Training:")
 
+        # Reset Validation Loss
+        validation_loss = 0
+
         # Train for the given number of presentations
         for presentation_num in range(presentations):
-            # str_start_val is used to "cut out" the first however many characters in the InChI name. This cut out
-            # section will be randomised to prevent the model from only predicting empty values.
+
+            # To prevent the model learning to predict only the padded empty chars, we use this splicing technique.
+            # This takes the relatively information dense lower half and splits it from the information sparse upper
+            # half. Each half is shuffled and then spliced back together, meaning the model gets a chance to see both
+            # info dense and info sparse input data.
             str_start_val = list(range(str_padding_len))
-            random.shuffle(str_start_val)
+            start_val_lower = str_start_val[0:int(str_padding_len/2)]
+            start_val_upper = str_start_val[int(str_padding_len/2):str_padding_len]
+
+            random.shuffle(start_val_lower)
+            random.shuffle(start_val_upper)
+
+            for idx in range(str_padding_len):
+                if idx % 2 == 0:
+                    str_start_val[idx] = start_val_lower[int(idx/2)]
+                else:
+                    str_start_val[idx] = start_val_upper[int(idx/2)]
+
             for step, start_val in enumerate(str_start_val):
+                # Only iterate over each image for as long as the generator is producing the same image.
+                if step == num_repeat_image:
+                    break
                 # Grab training inputs from the Training Generator
                 train_image_in, image_file_name, inchi_str = next(train_gen)
 
@@ -590,7 +610,7 @@ if __name__ == '__main__':
                 seed_input_as_str = decode_inchi_name(seed_input_full, codex)
                 seed_input = encode_inchi_name(seed_input_as_str, codex)
 
-                # Extract all encoded Str and Num information seperately.
+                # Extract all encoded Str and Num information separately.
                 seed_input_str = []
                 seed_input_num = []
                 for value in seed_input:
@@ -611,7 +631,7 @@ if __name__ == '__main__':
 
                 inchi_model.save("InChI_Model_Current_Train.h5", overwrite=True)
 
-                progbar(step, len(str_start_val), 20,
+                progbar(step, num_repeat_image, 20,
                         curr_presentation_num=presentation_num+1,
                         total_presentations=presentations,
                         loss_val_1=history.history['InChI_Name_Str_Processing_Dense_loss'][0],
@@ -642,25 +662,29 @@ if __name__ == '__main__':
             val_seed_input_num = np.array(val_seed_input_num).reshape((1, str_padding_len, 1))
 
             # Placeholder for the model's generated output
-            generated_output = []
+            generated_output = val_seed_input_full
 
             # Iterate for as long as is required to generate the correct length of string
             for step in range(str_padding_len-9):
+
                 # Predict the next character from the model
                 val_output_char = inchi_model.predict(x=[val_image_in, val_seed_input_str, val_seed_input_num])
 
+                val_encoded_str = list(np.round(val_output_char[0][0]))
+                val_numeric = list(np.round(val_output_char[1][0]))
+
                 # Append he next character to the generated output
-                generated_output.append(val_output_char)
+                generated_output.append([val_encoded_str, val_numeric])
 
                 # Replace the latest character in the seed with the generated character
-                val_seed_input[step+9] = val_output_char
+                val_seed_input_str[0, step + 9] = val_encoded_str
+                val_seed_input_num[0, step + 9] = val_numeric
 
             predicted_inchi = decode_inchi_name(generated_output, codex)
-            validation_loss = nltk.edit_distance(predicted_inchi, val_inchi_str)
+            validation_loss += nltk.edit_distance(predicted_inchi, val_inchi_str)
 
-            if validation_loss < best_validation_loss:
-                inchi_model.save("InChI_Model_Best_Val.h5", overwrite=True)
-                best_validation_loss = validation_loss
+        mean_levenstein_dist = validation_loss / int(presentations/10)
+        print(f"\tMean Levenstein Distance during Validation: {mean_levenstein_dist}")
 
     inchi_model.save("InChI_Model.h5")
 
