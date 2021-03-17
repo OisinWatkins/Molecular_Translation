@@ -564,7 +564,8 @@ if __name__ == '__main__':
 
     print(f"\n-Training Hyperparameters:\n"
           f"\tEpochs: {epochs}\n"
-          f"\tPresentations per epoch: {presentations}\n")
+          f"\tPresentations per epoch: {presentations}\n"
+          f"\tRepetitions per Image: {num_repeat_image}\n")
 
     print("-----Beginning Training-----")
     for epoch in range(1, epochs + 1):
@@ -637,6 +638,10 @@ if __name__ == '__main__':
                         loss_val_1=history.history['InChI_Name_Str_Processing_Dense_loss'][0],
                         loss_val_2=history.history['InChI_Name_Num_Processing_Dense_loss'][0])
 
+        print('\r', '#' * 20, f"[ {100.00}%]", f'[Current Presentation: {presentations}/{presentations}]',
+              '[Str Loss Value: {:>7.2}]'.format(history.history['InChI_Name_Str_Processing_Dense_loss'][0]),
+              '[Numeric Loss Val: {:>7.2}]'.format(history.history['InChI_Name_Num_Processing_Dense_loss'][0]))
+
         # Perform Validation
         for presentation_num in range(int(presentations/10)):
             progbar(presentation_num, int(presentations/10), 20)
@@ -684,10 +689,10 @@ if __name__ == '__main__':
             validation_loss += nltk.edit_distance(predicted_inchi, val_inchi_str)
 
         mean_levenstein_dist = validation_loss / int(presentations/10)
-        print(f"\tMean Levenstein Distance during Validation: {mean_levenstein_dist}")
+        print('\r', '#' * 20, f"[ {100.00}%]",
+              f'[Mean Levenstein Distance during Validation: {mean_levenstein_dist}]')
 
     inchi_model.save("InChI_Model.h5")
-
 
     """
     --------------------------------------------------------------------------------------------------------------------
