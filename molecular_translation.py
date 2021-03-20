@@ -354,24 +354,20 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     image_processing_head_input = keras.Input(shape=image_input_dimension)
     image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_1')(image_processing_head_input)
-    image_processing_head = layers.MaxPool2D(pool_size=(2, 2),
-                                             name='Image_Processing_MaxPool2D_1')(image_processing_head)
-    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_1')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_1')(image_processing_head)
     image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_2')(image_processing_head)
-    image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
-                                                name='Image_Processing_MaxPool2D_2')(image_processing_head)
-    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_2')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_2')(image_processing_head)
     image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_3')(image_processing_head)
     image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
                                                 name='Image_Processing_MaxPool2D_3')(image_processing_head)
-    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_3')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_3')(image_processing_head)
     image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_4')(image_processing_head)
     image_processing_head = layers.MaxPooling2D(pool_size=(2, 2),
                                                 name='Image_Processing_MaxPool2D_4')(image_processing_head)
-    image_processing_head = layers.Dropout(0.2, name='Image_Processing_Dropout_4')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_4')(image_processing_head)
     image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_5')(image_processing_head)
     image_processing_head = layers.Flatten(name='Image_Processing_Flatten')(image_processing_head)
@@ -381,41 +377,28 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     str_processing_head_input = keras.Input(shape=str_input_dimension)
     str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
                                                  name='Str_Processing_Conv1d_1')(str_processing_head_input)
-    str_processing_head = layers.MaxPooling1D(pool_size=2, name='Str_Processing_MaxPool1D_1')(str_processing_head)
-    str_processing_head = layers.Dropout(0.1, name='Str_Processing_Dropout_1')(str_processing_head)
-    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Str_Processing_Conv1d_2')(str_processing_head)
-    str_processing_head = layers.MaxPooling1D(pool_size=2, name='Str_Processing_MaxPool1D_2')(str_processing_head)
-    str_processing_head = layers.Dropout(0.1, name='Str_Processing_Dropout_2')(str_processing_head)
-    str_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Str_Processing_Conv1d_3')(str_processing_head)
 
     # Third: let's build the Encoded Number input handling head
     num_input_dimension = (len_padded_str, 1)
     num_processing_head_input = keras.Input(shape=num_input_dimension)
     num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
                                                  name='Num_Processing_Conv1d_1')(num_processing_head_input)
-    num_processing_head = layers.MaxPooling1D(pool_size=2, name='Num_Processing_MaxPool1D_1')(num_processing_head)
-    num_processing_head = layers.Dropout(0.1, name='Num_Processing_Dropout_1')(num_processing_head)
-    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Num_Processing_Conv1d_2')(num_processing_head)
-    num_processing_head = layers.MaxPooling1D(pool_size=2, name='Num_Processing_MaxPool1D_2')(num_processing_head)
-    num_processing_head = layers.Dropout(0.1, name='Num_Processing_Dropout_2')(num_processing_head)
-    num_processing_head = layers.SeparableConv1D(filters=128, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Num_Processing_Conv1d_3')(num_processing_head)
 
     # Fourth: Concatenate the String and Number processed outputs
     combined_name_input = tf.concat([str_processing_head, num_processing_head], -1)
-    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='valid', activation='relu',
-                                                     name='Combined_Name_Conv1d_1')(combined_name_input)
-    combined_name_processed = layers.SeparableConv1D(filters=256, kernel_size=3, padding='valid', activation='relu',
-                                                     name='Combined_Name_Conv1d_2')(combined_name_processed)
+    combined_name_processed = layers.LSTM(units=512, return_sequences=True,
+                                          name='Combined_Name_LSTM_1')(combined_name_input)
+    combined_name_processed = layers.LSTM(units=512, return_sequences=True,
+                                          name='Combined_Name_LSTM_2')(combined_name_processed)
+    combined_name_processed = layers.LSTM(units=512, return_sequences=True,
+                                          name='Combined_Name_LSTM_3')(combined_name_processed)
     combined_name_processed = layers.Flatten(name='Combined_Name_Flatten')(combined_name_processed)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
     inchi_name_input = tf.concat([image_processing_head, combined_name_processed], -1)
 
-    inchi_name_output = layers.Dense(units=512, activation='relu', name='InChI_Name_Processing_Dense')(inchi_name_input)
+    inchi_name_output = layers.Dense(units=512, activation='relu', name='InChI_Name_Processing_Dense_1')(inchi_name_input)
+    inchi_name_output = layers.Dense(units=512, activation='relu', name='InChI_Name_Processing_Dense_2')(inchi_name_output)
 
     # Sixth: Define each output tail and compile the model
     inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='sigmoid',
@@ -567,7 +550,7 @@ if __name__ == '__main__':
     print(f"\n-Training Hyperparameters:\n"
           f"\tEpochs: {epochs}\n"
           f"\tPresentations per epoch: {presentations}\n"
-          f"\tTraining Patience: {patience}"
+          f"\tTraining Patience: {patience_orig}\n"
           f"\tRepetitions per Image: {num_repeat_image}\n")
 
     print("-----Beginning Training-----")
@@ -704,8 +687,12 @@ if __name__ == '__main__':
 
             # Else add to patience up to a maximum of the original patience val
             else:
-                if not patience == patience_orig:
+                if patience <= patience_orig:
                     patience += 1
+
+        # End training if the patience value has expired
+        if patience == 0:
+            break
 
         # Pass on the new val loss
         old_val_loss = mean_levenstein_dist
