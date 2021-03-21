@@ -47,8 +47,8 @@ def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300)
                      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # Value encoding a numeric part of the input string
-    encoded_numeric = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                       0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+    encoded_numeric = [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
+                       -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, 1.0]
 
     # Counter used to control skipping values in the string, specifically for numerics longer than 2 values
     counter = 0
@@ -74,8 +74,8 @@ def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300)
         # Otherwise encode a string value normally using the provided codex_list
         else:
             char_index = codex_list.index(character)
-            encoded_character = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-                                 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            encoded_character = [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
+                                 -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
             encoded_character[char_index] = 1.0
             encoded_name.append([encoded_character, [0.0]])
 
@@ -375,21 +375,23 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     # Second: let's build the Encoded String input handling head
     str_input_dimension = (len_padded_str, len_encoded_str)
     str_processing_head_input = keras.Input(shape=str_input_dimension)
-    str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Str_Processing_Conv1d_1')(str_processing_head_input)
+    # str_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+    #                                              name='Str_Processing_Conv1d_1')(str_processing_head_input)
 
     # Third: let's build the Encoded Number input handling head
     num_input_dimension = (len_padded_str, 1)
     num_processing_head_input = keras.Input(shape=num_input_dimension)
-    num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
-                                                 name='Num_Processing_Conv1d_1')(num_processing_head_input)
+    # num_processing_head = layers.SeparableConv1D(filters=64, kernel_size=3, padding='valid', activation='relu',
+    #                                              name='Num_Processing_Conv1d_1')(num_processing_head_input)
 
     # Fourth: Concatenate the String and Number processed outputs
-    combined_name_input = tf.concat([str_processing_head, num_processing_head], -1)
+    combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
     combined_name_processed = layers.LSTM(units=512, return_sequences=True,
                                           name='Combined_Name_LSTM_1')(combined_name_input)
+    combined_name_processed = layers.Dropout(0.1, name='Combined_Name_Dropout_1')(combined_name_processed)
     combined_name_processed = layers.LSTM(units=512, return_sequences=True,
                                           name='Combined_Name_LSTM_2')(combined_name_processed)
+    combined_name_processed = layers.Dropout(0.1, name='Combined_Name_Dropout_2')(combined_name_processed)
     combined_name_processed = layers.LSTM(units=512, return_sequences=True,
                                           name='Combined_Name_LSTM_3')(combined_name_processed)
     combined_name_processed = layers.Flatten(name='Combined_Name_Flatten')(combined_name_processed)
@@ -401,17 +403,18 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     inchi_name_output = layers.Dense(units=512, activation='relu', name='InChI_Name_Processing_Dense_2')(inchi_name_output)
 
     # Sixth: Define each output tail and compile the model
-    inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='sigmoid',
+    inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='tanh',
                                          name='InChI_Name_Str_Processing_Dense')(inchi_name_output)
 
-    inchi_name_output_num = layers.Dense(units=1, name='InChI_Name_Num_Processing_Dense')(inchi_name_output)
+    inchi_name_output_num = layers.Dense(units=1, activation='relu',
+                                         name='InChI_Name_Num_Processing_Dense')(inchi_name_output)
 
     inchi_name_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
 
     optimizer = tf.keras.optimizers.Adam(lr)
     losses = {
-        'InChI_Name_Str_Processing_Dense': tf.losses.BinaryCrossentropy(),
+        'InChI_Name_Str_Processing_Dense': tf.losses.MeanSquaredError(),
         'InChI_Name_Num_Processing_Dense': tf.losses.MeanSquaredError()
     }
     losses_weights = {"InChI_Name_Str_Processing_Dense": 1.0, "InChI_Name_Num_Processing_Dense": 0.01}
