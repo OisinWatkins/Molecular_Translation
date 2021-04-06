@@ -365,6 +365,13 @@ This section is devoted to the InChI Text Generation model
 
 
 def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
+    """
+
+    :param len_encoded_str:
+    :param len_padded_str:
+    :param lr:
+    :return:
+    """
 
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
@@ -390,10 +397,9 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
                                                          image_processed_shape[3]))(image_processing_head)
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
-    print(len(K.int_shape(image_processing_head)))
-    image_processing_head = tf_shuffle_axis(image_processing_head, axis=1)
+    # image_processing_head = tf_shuffle_axis(image_processing_head, axis=1)
 
-    image_processing_head = layers.LSTM(units=512, return_sequences=True,
+    image_processing_head = layers.LSTM(units=1024, return_sequences=True,
                                         name='Image_Processing_LSTM_1')(image_processing_head)
 
     # Second: let's build the Encoded String input handling head
@@ -406,35 +412,33 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     # Fourth: Concatenate the String and Number processed outputs
     combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
-    combined_name_processed = layers.LSTM(units=512, return_sequences=True,
+    combined_name_processed = layers.LSTM(units=1024, return_sequences=True,
                                           name='Combined_Name_LSTM_1')(combined_name_input)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
     combined_input = tf.concat([image_processing_head, combined_name_processed], -1)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
                                            name='Combined_Input_LSTM_1')(combined_input)
     combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_1')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
                                            name='Combined_Input_LSTM_2')(combined_input_processed)
     combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_2')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
                                            name='Combined_Input_LSTM_3')(combined_input_processed)
-    combined_input_processed = layers.Flatten(name='Combined_Input_Flatten')(combined_input_processed)
-
-    inchi_name_output = layers.Dense(units=512, activation='tanh', name='InChI_Name_Processing_Dense_1')(combined_input_processed)
-    inchi_name_output = layers.Dense(units=512, activation='tanh', name='InChI_Name_Processing_Dense_2')(inchi_name_output)
+    combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_3')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, name='Combined_Input_LSTM_4')(combined_input_processed)
 
     # Sixth: Define each output tail and compile the model
     inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='tanh',
-                                         name='InChI_Name_Str_Processing_Dense')(inchi_name_output)
+                                         name='InChI_Name_Str_Processing_Dense')(combined_input_processed)
 
     inchi_name_output_num = layers.Dense(units=1,
-                                         name='InChI_Name_Num_Processing_Dense')(inchi_name_output)
+                                         name='InChI_Name_Num_Processing_Dense')(combined_input_processed)
 
     inchi_name_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
 
-    optimizer = tf.keras.optimizers.Adam(lr)
+    optimizer = tf.keras.optimizers.RMSprop(lr)
     losses = {
         'InChI_Name_Str_Processing_Dense': tf.losses.MeanSquaredError(),
         'InChI_Name_Num_Processing_Dense': tf.losses.MeanSquaredError()
@@ -447,6 +451,92 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     return inchi_name_model
 
+
+def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
+    """
+
+    :param len_encoded_str:
+    :param len_padded_str:
+    :param lr:
+    :return:
+    """
+    # First: let's build the Image Processing head of the model
+    image_input_dimension = (1500, 1500, 1)
+    image_processing_head_input = keras.Input(shape=image_input_dimension)
+    image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Discr_Image_Processing_Conv2D_1')(image_processing_head_input)
+    image_processing_head = layers.Dropout(0.1, name='Discr_Image_Processing_Dropout_1')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Discr_Image_Processing_Conv2D_2')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Discr_Image_Processing_Dropout_2')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Discr_Image_Processing_Conv2D_3')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Discr_Image_Processing_Dropout_3')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
+                                                   name='Discr_Image_Processing_Conv2D_4')(image_processing_head)
+    image_processing_head = layers.Dropout(0.1, name='Discr_Image_Processing_Dropout_4')(image_processing_head)
+    image_processing_head = layers.SeparableConv2D(filters=len_padded_str, kernel_size=3,
+                                                   strides=(2, 2), activation='relu',
+                                                   name='Discr_Image_Processing_Conv2D_5')(image_processing_head)
+
+    image_processed_shape = K.int_shape(image_processing_head)
+    image_processing_head = layers.Reshape(target_shape=(image_processed_shape[1]*image_processed_shape[2],
+                                                         image_processed_shape[3]))(image_processing_head)
+
+    image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
+    # image_processing_head = tf_shuffle_axis(image_processing_head, axis=1)
+
+    image_processing_head = layers.LSTM(units=1024, return_sequences=True,
+                                        name='Discr_Image_Processing_LSTM_1')(image_processing_head)
+
+    # Second: let's build the Encoded String input handling head
+    str_input_dimension = (len_padded_str, len_encoded_str)
+    str_processing_head_input = keras.Input(shape=str_input_dimension)
+
+    # Third: let's build the Encoded Number input handling head
+    num_input_dimension = (len_padded_str, 1)
+    num_processing_head_input = keras.Input(shape=num_input_dimension)
+
+    # Fourth: Concatenate the String and Number processed outputs
+    combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
+    combined_name_processed = layers.LSTM(units=1024, return_sequences=True,
+                                          name='Discr_Combined_Name_LSTM_1')(combined_name_input)
+
+    # Fifth: Join outputs from the input heads and process into encoded strings
+    combined_input = tf.concat([image_processing_head, combined_name_processed], -1)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+                                           name='Discr_Combined_Input_LSTM_1')(combined_input)
+    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_1')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+                                           name='Discr_Combined_Input_LSTM_2')(combined_input_processed)
+    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_2')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+                                           name='Discr_Combined_Input_LSTM_3')(combined_input_processed)
+    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_3')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+                                           name='Discr_Combined_Input_LSTM_4')(combined_input_processed)
+
+    # Sixth: Define each output tail and compile the model
+    discriminator_output = layers.Flatten()(combined_input_processed)
+    discriminator_output = layers.Dropout(0.4)(discriminator_output)
+    discriminator_output = layers.Dense(units=1, name='Discriminator_Dense',
+                                        activation='sigmoid')(discriminator_output)
+
+    discriminator_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
+                                       outputs=discriminator_output, name="InChI_Name_Discriminator")
+
+    optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0)
+    losses = {
+        'Discriminator_Dense': tf.losses.BinaryCrossentropy()
+    }
+    discriminator_model.compile(optimizer=optimizer, loss=losses)
+    discriminator_model.trainable = False
+
+    print("\n\n")
+    discriminator_model.summary()
+    print("\n\n")
+
+    return discriminator_model
 
 """
 ------------------------------------------------------------------------------------------------------------------------
@@ -565,7 +655,8 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=5e-6)
+    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+    inchi_discriminator = build_discriminator(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
 
     epochs = 10000
     patience = 10
