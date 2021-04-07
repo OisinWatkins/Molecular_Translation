@@ -122,9 +122,9 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     return inchi_name
 
 
-def data_generator(labels: list, folder_options: list,
+def data_generator(labels: list, folder_options: list, codex_list: list, padded_size: int = 300, batch_size: int = 1,
                    dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\',
-                   batch_loop: int = 1, augment_data: bool = True, invert_image: bool = True, repeat_image: int = 1):
+                   folder_loop: int = 1, augment_data: bool = True, invert_image: bool = True, repeat_image: int = 1):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
@@ -146,50 +146,87 @@ def data_generator(labels: list, folder_options: list,
             file_list = [f for f in listdir(full_path) if isfile(join(full_path, f))]
 
             # Re-iterate over the same folder, shuffling the order each time
-            for batch_loop_num in range(batch_loop):
+            for folder_itr in range(folder_loop):
                 random.shuffle(file_list)
 
                 # Iterate through each file, preprocess and yield each
                 for file in file_list:
                     # Repeat each training input as many times as desired
                     for repeat in range(repeat_image):
-                        # Prepare Image augmentations
-                        rand_trans_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
-                        rand_trans_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
-                        rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
 
-                        # Load image in Black and White with a constant size of 1500 x 1500
-                        file_path = full_path + file
-                        image_data = Image.open(file_path)
+                        # Instantiate the batch
+                        image_data_batch = np.zeros(shape=(batch_size, 1500, 1500, 1))
+                        output_str_batch = np.zeros(shape=(batch_size, padded_size, len(codex_list) + 1))
+                        output_num_batch = np.zeros(shape=(batch_size, padded_size, 1))
 
-                        bg_colour = 1
+                        # Generate as big a batch of data as is requested
+                        for batch_num in range(batch_size):
 
-                        if invert_image:
-                            # Invert image colour
-                            image_data = ImageOps.invert(image_data)
-                            bg_colour = 0
+                            # Prepare Image augmentations
+                            rand_trans_mag_vert = round(np.random.uniform(-translation_mag, translation_mag))
+                            rand_trans_mag_horizontal = round(np.random.uniform(-translation_mag, translation_mag))
+                            rand_rotation = np.random.uniform(-rotations_mag, rotations_mag)
 
-                        image_data = image_data.convert('1')
+                            # Load image in Black and White with a constant size of 1500 x 1500
+                            file_path = full_path + file
+                            image_data = Image.open(file_path)
 
-                        if augment_data:
-                            # Perform Augmentation
-                            image_data = image_data.rotate(angle=rand_rotation,
-                                                           translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
-                                                           fillcolor=bg_colour,
-                                                           expand=True)
+                            bg_colour = 1
 
-                        image_data = ImageOps.pad(image_data, (1500, 1500), color=bg_colour)
-                        image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
+                            if invert_image:
+                                # Invert image colour
+                                image_data = ImageOps.invert(image_data)
+                                bg_colour = 0
 
-                        # Find the correct label from the csv file data
-                        image_name = file[0:-4]
-                        output_string = ''
-                        for label in labels:
-                            if label[0] == image_name:
-                                output_string = label[1]
-                                break
+                            image_data = image_data.convert('1')
 
-                        yield image_data_array, image_name, output_string
+                            if augment_data:
+                                # Perform Augmentation
+                                image_data = image_data.rotate(angle=rand_rotation,
+                                                               translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
+                                                               fillcolor=bg_colour,
+                                                               expand=True)
+
+                            image_data = ImageOps.pad(image_data, (1500, 1500), color=bg_colour)
+                            image_data_array = np.array(image_data).astype(np.float32).reshape((1, 1500, 1500, 1))
+
+                            # Find the correct label from the csv file data
+                            image_name = file[0:-4]
+                            output_string = ''
+                            for label in labels:
+                                if label[0] == image_name:
+                                    output_string = label[1]
+                                    break
+
+                            output_encoded = encode_inchi_name(output_string, codex_list, padded_size)
+
+                            # Extract all encoded Str and Num information separately.
+                            output_str = []
+                            output_num = []
+                            for char in output_encoded:
+                                output_str.append(char[0])
+                                output_num.append(char[1])
+
+                            # Cast Output Str and Num data to Numpy arrays and reshape to suit
+                            output_str_encoded = np.array(output_str).reshape((1, padded_size, len(codex_list) + 1))
+                            output_num_encoded = np.array(output_num).reshape((1, padded_size, 1))
+
+                            # Add new data to batch
+                            image_data_batch[batch_num] = image_data_array
+                            output_str_batch[batch_num] = output_str_encoded
+                            output_num_batch[batch_num] = output_num_encoded
+
+                        yield image_data_batch, [output_str_batch, output_num_batch]  # , image_name
+
+
+def levensein_distance(y_true, y_pred):
+    """
+
+    :param y_true:
+    :param y_pred:
+    :return:
+    """
+    return nltk.edit_distance(s1=decode_inchi_name(y_true, codex), s2=decode_inchi_name(y_pred, codex))
 
 
 def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None, loss_val_2=None):
@@ -397,28 +434,13 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
                                                          image_processed_shape[3]))(image_processing_head)
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
-    # image_processing_head = tf_shuffle_axis(image_processing_head, axis=1)
 
     image_processing_head = layers.LSTM(units=1024, return_sequences=True,
                                         name='Image_Processing_LSTM_1')(image_processing_head)
 
-    # Second: let's build the Encoded String input handling head
-    str_input_dimension = (len_padded_str, len_encoded_str)
-    str_processing_head_input = keras.Input(shape=str_input_dimension)
-
-    # Third: let's build the Encoded Number input handling head
-    num_input_dimension = (len_padded_str, 1)
-    num_processing_head_input = keras.Input(shape=num_input_dimension)
-
-    # Fourth: Concatenate the String and Number processed outputs
-    combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
-    combined_name_processed = layers.LSTM(units=1024, return_sequences=True,
-                                          name='Combined_Name_LSTM_1')(combined_name_input)
-
     # Fifth: Join outputs from the input heads and process into encoded strings
-    combined_input = tf.concat([image_processing_head, combined_name_processed], -1)
     combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
-                                           name='Combined_Input_LSTM_1')(combined_input)
+                                           name='Combined_Input_LSTM_1')(image_processing_head)
     combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_1')(combined_input_processed)
     combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
                                            name='Combined_Input_LSTM_2')(combined_input_processed)
@@ -426,25 +448,28 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
                                            name='Combined_Input_LSTM_3')(combined_input_processed)
     combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_3')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, name='Combined_Input_LSTM_4')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+                                           name='Combined_Input_LSTM_4')(combined_input_processed)
 
     # Sixth: Define each output tail and compile the model
-    inchi_name_output_str = layers.Dense(units=len_encoded_str, activation='tanh',
-                                         name='InChI_Name_Str_Processing_Dense')(combined_input_processed)
+    inchi_name_output_str = layers.LSTM(units=len_encoded_str, activation='tanh', return_sequences=True,
+                                        name='InChI_Name_Str_Processing_LSTM')(combined_input_processed)
 
-    inchi_name_output_num = layers.Dense(units=1,
-                                         name='InChI_Name_Num_Processing_Dense')(combined_input_processed)
+    inchi_name_output_num = layers.LSTM(units=1, activation=None, return_sequences=True,
+                                        name='InChI_Name_Num_Processing_LSTM')(combined_input_processed)
 
-    inchi_name_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
+    inchi_name_model = models.Model(inputs=image_processing_head_input,
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
 
-    optimizer = tf.keras.optimizers.RMSprop(lr)
+    optimizer = tf.keras.optimizers.Adam(lr)
     losses = {
-        'InChI_Name_Str_Processing_Dense': tf.losses.MeanSquaredError(),
-        'InChI_Name_Num_Processing_Dense': tf.losses.MeanSquaredError()
+        'InChI_Name_Str_Processing_LSTM': tf.losses.MeanSquaredError(),
+        'InChI_Name_Num_Processing_LSTM': tf.losses.MeanSquaredError()
     }
-    losses_weights = {"InChI_Name_Str_Processing_Dense": 1.0, "InChI_Name_Num_Processing_Dense": 0.01}
-    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
+    losses_weights = {"InChI_Name_Str_Processing_LSTM": 1.0, "InChI_Name_Num_Processing_LSTM": 0.01}
+
+    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights, metrics=[levensein_distance])
+
     print("\n\n")
     inchi_name_model.summary()
     print("\n\n")
@@ -517,8 +542,8 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
                                            name='Discr_Combined_Input_LSTM_4')(combined_input_processed)
 
     # Sixth: Define each output tail and compile the model
-    discriminator_output = layers.Flatten()(combined_input_processed)
-    discriminator_output = layers.Dropout(0.4)(discriminator_output)
+    discriminator_output = layers.Flatten(name='Discriminator_Flatten')(combined_input_processed)
+    discriminator_output = layers.Dropout(0.4, name='Discriminator_Dropout')(discriminator_output)
     discriminator_output = layers.Dense(units=1, name='Discriminator_Dense',
                                         activation='sigmoid')(discriminator_output)
 
@@ -537,6 +562,7 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     print("\n\n")
 
     return discriminator_model
+
 
 """
 ------------------------------------------------------------------------------------------------------------------------
@@ -602,12 +628,17 @@ if __name__ == '__main__':
     print("\n-Testing Permutations ready")
 
     str_padding_len = 300
-    num_repeat_image = 6
+    num_repeat_image = 1
+    batch_length = 10
 
     # Instantiate all generators needed for training, validation and testing
-    train_gen = data_generator(training_labels, training_folder_permutations, batch_loop=1, repeat_image=num_repeat_image)
-    validation_gen = data_generator(training_labels, validation_folder_permutations)
-    test_gen = data_generator(training_labels, testing_folder_permutations, augment_data=False)
+    train_gen = data_generator(training_labels, training_folder_permutations, codex, batch_size=batch_length,
+                               padded_size=str_padding_len, repeat_image=num_repeat_image)
+
+    validation_gen = data_generator(training_labels, validation_folder_permutations, codex, padded_size=str_padding_len)
+
+    test_gen = data_generator(training_labels, testing_folder_permutations, codex,
+                              padded_size=str_padding_len, augment_data=False)
     print("\n-Data Generators are ready")
 
     """
@@ -656,162 +687,18 @@ if __name__ == '__main__':
     --------------------------------------------------------------------------------------------------------------------
     """
     inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
-    inchi_discriminator = build_discriminator(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+    # inchi_discriminator = build_discriminator(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
 
-    epochs = 10000
-    patience = 10
-    patience_orig = 10
-    presentations = 600
+    checkpoint_filepath = 'D:\\AI Projects\\Molecular_Translation\\'
+    model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=checkpoint_filepath,
+        save_weights_only=False,
+        monitor='levenstein_distance',
+        mode='min',
+        save_best_only=True)
 
-    print(f"\n-Training Hyperparameters:\n"
-          f"\tEpochs: {epochs}\n"
-          f"\tPresentations per epoch: {presentations}\n"
-          f"\tTraining Patience: {patience_orig}\n"
-          f"\tRepetitions per Image: {num_repeat_image}\n")
-
-    print("-----Beginning Training-----")
-    old_val_loss = 0
-    for epoch in range(1, epochs + 1):
-        print(f"Epoch: {epoch} Training:")
-
-        # Reset Validation Loss
-        validation_loss = 0
-
-        # Train for the given number of presentations
-        for presentation_num in range(presentations):
-
-            # To prevent the model learning to predict only the padded empty chars, we use this splicing technique.
-            # This takes the relatively information dense lower half and splits it from the information sparse upper
-            # half. Each half is shuffled and then spliced back together, meaning the model gets a chance to see both
-            # info dense and info sparse input data.
-            str_start_val = list(range(str_padding_len))
-            start_val_lower = str_start_val[0:int(str_padding_len/2)]
-            start_val_upper = str_start_val[int(str_padding_len/2):str_padding_len]
-
-            random.shuffle(start_val_lower)
-            random.shuffle(start_val_upper)
-
-            for idx in range(str_padding_len):
-                if idx % 2 == 0:
-                    str_start_val[idx] = start_val_lower[int(idx/2)]
-                else:
-                    str_start_val[idx] = start_val_upper[int(idx/2)]
-
-            for step, start_val in enumerate(str_start_val):
-                # Only iterate over each image for as long as the generator is producing the same image.
-                if step == num_repeat_image:
-                    break
-                # Grab training inputs from the Training Generator
-                train_image_in, image_file_name, inchi_str = next(train_gen)
-
-                # Encode the InChI string and extract the Seed value for training and the desired output value for
-                # that seed
-                encoded_name = encode_inchi_name(inchi_str, codex)
-                seed_input_full = encoded_name[0:start_val]
-                output_char = encoded_name[start_val]
-
-                # Now decode and re-encode the seed value to get the desired padding of empty characters
-                seed_input_as_str = decode_inchi_name(seed_input_full, codex)
-                seed_input = encode_inchi_name(seed_input_as_str, codex)
-
-                # Extract all encoded Str and Num information separately.
-                seed_input_str = []
-                seed_input_num = []
-                for value in seed_input:
-                    seed_input_str.append(value[0])
-                    seed_input_num.append(value[1])
-
-                # Cast them to Numpy arrays with the correct shapes
-                seed_input_str = np.array(seed_input_str).reshape((1, str_padding_len, len(codex)+1))
-                seed_input_num = np.array(seed_input_num).reshape((1, str_padding_len, 1))
-
-                # Cast the outputs to Numpy arrays with the correct shapes
-                output_char_str = np.array(output_char[0]).reshape((1, len(codex)+1))
-                output_char_num = np.array(output_char[1]).reshape((1, 1))
-
-                # Train the model for just 1 input
-                history = inchi_model.fit(x=[train_image_in, seed_input_str, seed_input_num],
-                                          y=[output_char_str, output_char_num], batch_size=1, epochs=1, verbose=0)
-
-                inchi_model.save("InChI_Model_Current_Train.h5", overwrite=True)
-
-                progbar(step, num_repeat_image, 20,
-                        curr_presentation_num=presentation_num+1,
-                        total_presentations=presentations,
-                        loss_val_1=history.history['InChI_Name_Str_Processing_Dense_loss'][0],
-                        loss_val_2=history.history['InChI_Name_Num_Processing_Dense_loss'][0])
-
-        print('\r', '#' * 20, f"[ {100.00}%]", f'[Current Presentation: {presentations}/{presentations}]',
-              '[Str Loss Value: {:>7.2}]'.format(history.history['InChI_Name_Str_Processing_Dense_loss'][0]),
-              '[Numeric Loss Val: {:>7.2}]'.format(history.history['InChI_Name_Num_Processing_Dense_loss'][0]))
-
-        # Perform Validation
-        for presentation_num in range(int(presentations/10)):
-            progbar(presentation_num, int(presentations/10), 20)
-
-            # Grab the output from the Validation Generator
-            val_image_in, val_image_file_name, val_inchi_str = next(validation_gen)
-
-            # Encode, splice, decode and re-encode the InChI name for the seed value
-            val_encoded_name = encode_inchi_name(val_inchi_str, codex)
-            val_seed_input_full = val_encoded_name[0:9]
-            val_seed_input_as_str = decode_inchi_name(val_seed_input_full, codex)
-            val_seed_input = encode_inchi_name(val_seed_input_as_str, codex)
-
-            # Extract the Str and Num encodings separately
-            val_seed_input_str = []
-            val_seed_input_num = []
-            for value in val_seed_input:
-                val_seed_input_str.append(value[0])
-                val_seed_input_num.append(value[1])
-
-            # Store the seed inputs as Numpy arrays
-            val_seed_input_str = np.array(val_seed_input_str).reshape((1, str_padding_len, len(codex)+1))
-            val_seed_input_num = np.array(val_seed_input_num).reshape((1, str_padding_len, 1))
-
-            # Placeholder for the model's generated output
-            generated_output = val_seed_input_full
-
-            # Iterate for as long as is required to generate the correct length of string
-            for step in range(str_padding_len-9):
-
-                # Predict the next character from the model
-                val_output_char = inchi_model.predict(x=[val_image_in, val_seed_input_str, val_seed_input_num])
-
-                val_encoded_str = list(np.round(val_output_char[0][0]))
-                val_numeric = list(np.round(val_output_char[1][0]))
-
-                # Append he next character to the generated output
-                generated_output.append([val_encoded_str, val_numeric])
-
-                # Replace the latest character in the seed with the generated character
-                val_seed_input_str[0, step + 9] = val_encoded_str
-                val_seed_input_num[0, step + 9] = val_numeric
-
-            predicted_inchi = decode_inchi_name(generated_output, codex)
-            validation_loss += nltk.edit_distance(predicted_inchi, val_inchi_str)
-
-        mean_levenstein_dist = validation_loss / int(presentations/10)
-        print('\r', '#' * 20, f"[ {100.00}%]",
-              f'[Mean Levenstein Distance during Validation: {mean_levenstein_dist}]')
-
-        # Handle Training Patience if not on the first epoch
-        if not epoch == 1:
-            # If the validation performance has degraded w.r.t the last epoch, deduct from patience
-            if mean_levenstein_dist > old_val_loss:
-                patience -= 1
-
-            # Else add to patience up to a maximum of the original patience val
-            else:
-                if patience <= patience_orig:
-                    patience += 1
-
-        # End training if the patience value has expired
-        if patience == 0:
-            break
-
-        # Pass on the new val loss
-        old_val_loss = mean_levenstein_dist
+    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, verbose=2, callbacks=[model_checkpoint_callback],
+                    workers=4, use_multiprocessing=True)
 
     inchi_model.save("InChI_Model.h5")
 
