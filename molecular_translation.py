@@ -219,7 +219,7 @@ def data_generator(labels: list, folder_options: list, codex_list: list, padded_
                         yield image_data_batch, [output_str_batch, output_num_batch]  # , image_name
 
 
-def levensein_distance(y_true, y_pred):
+def levenshtein_distance(y_true, y_pred):
     """
 
     :param y_true:
@@ -435,20 +435,17 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
 
-    image_processing_head = layers.LSTM(units=1024, return_sequences=True,
+    image_processing_head = layers.LSTM(units=512, return_sequences=True,
                                         name='Image_Processing_LSTM_1')(image_processing_head)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                            name='Combined_Input_LSTM_1')(image_processing_head)
-    combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_1')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                            name='Combined_Input_LSTM_2')(combined_input_processed)
-    combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_2')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                            name='Combined_Input_LSTM_3')(combined_input_processed)
-    combined_input_processed = layers.Dropout(0.1, name='Combined_Input_Dropout_3')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                            name='Combined_Input_LSTM_4')(combined_input_processed)
 
     # Sixth: Define each output tail and compile the model
@@ -468,7 +465,7 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     }
     losses_weights = {"InChI_Name_Str_Processing_LSTM": 1.0, "InChI_Name_Num_Processing_LSTM": 0.01}
 
-    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights, metrics=[levensein_distance])
+    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights, metrics=[levenshtein_distance])
 
     print("\n\n")
     inchi_name_model.summary()
@@ -629,7 +626,7 @@ if __name__ == '__main__':
 
     str_padding_len = 300
     num_repeat_image = 1
-    batch_length = 10
+    batch_length = 2
 
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations, codex, batch_size=batch_length,
@@ -693,12 +690,11 @@ if __name__ == '__main__':
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
         save_weights_only=False,
-        monitor='levenstein_distance',
+        monitor='InChI_Name_Str_Processing_LSTM_mse',
         mode='min',
         save_best_only=True)
 
-    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, verbose=2, callbacks=[model_checkpoint_callback],
-                    workers=4, use_multiprocessing=True)
+    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, verbose=1, callbacks=[model_checkpoint_callback])
 
     inchi_model.save("InChI_Model.h5")
 
