@@ -129,7 +129,17 @@ def data_generator(labels: list, folder_options: list, codex_list: list, padded_
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
 
-    :return: image_data_array, image_name, output_string
+    :param labels:
+    :param folder_options:
+    :param codex_list:
+    :param padded_size:
+    :param batch_size:
+    :param dataset_path:
+    :param folder_loop:
+    :param augment_data:
+    :param invert_image:
+    :param repeat_image:
+    :return: image_data_array, output_string
     """
     # Limitations on the Augmentation performed on the training and validation inputs
     translation_mag = 10
@@ -226,7 +236,9 @@ def levenshtein_distance(y_true, y_pred):
     :param y_pred:
     :return:
     """
-    return nltk.edit_distance(s1=decode_inchi_name(y_true, codex), s2=decode_inchi_name(y_pred, codex))
+    edit_distance = 0
+
+    return edit_distance
 
 
 def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None, loss_val_2=None):
@@ -439,33 +451,39 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
                                         name='Image_Processing_LSTM_1')(image_processing_head)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                           name='Combined_Input_LSTM_1')(image_processing_head)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                           name='Combined_Input_LSTM_2')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                           name='Combined_Input_LSTM_3')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                           name='Combined_Input_LSTM_4')(combined_input_processed)
+    combined_input_processed_1 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
+                                             name='Combined_Input_LSTM_1')(image_processing_head)
+    combined_input_processed_1 = layers.Average(name='Combined_Input_AVG_1')([image_processing_head,
+                                                                              combined_input_processed_1])
+    combined_input_processed_2 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
+                                             name='Combined_Input_LSTM_2')(combined_input_processed_1)
+    combined_input_processed_2 = layers.Average(name='Combined_Input_AVG_2')([image_processing_head,
+                                                                              combined_input_processed_2])
+    combined_input_processed_3 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
+                                             name='Combined_Input_LSTM_3')(combined_input_processed_2)
+    combined_input_processed_3 = layers.Average(name='Combined_Input_AVG_3')([image_processing_head,
+                                                                              combined_input_processed_3])
+    combined_input_processed_4 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
+                                             name='Combined_Input_LSTM_4')(combined_input_processed_3)
 
     # Sixth: Define each output tail and compile the model
     inchi_name_output_str = layers.LSTM(units=len_encoded_str, activation='tanh', return_sequences=True,
-                                        name='InChI_Name_Str_Processing_LSTM')(combined_input_processed)
+                                        name='InChI_Name_Str')(combined_input_processed_4)
 
     inchi_name_output_num = layers.LSTM(units=1, activation=None, return_sequences=True,
-                                        name='InChI_Name_Num_Processing_LSTM')(combined_input_processed)
+                                        name='InChI_Name_Num')(combined_input_processed_4)
 
     inchi_name_model = models.Model(inputs=image_processing_head_input,
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
 
     optimizer = tf.keras.optimizers.Adam(lr)
     losses = {
-        'InChI_Name_Str_Processing_LSTM': tf.losses.MeanSquaredError(),
-        'InChI_Name_Num_Processing_LSTM': tf.losses.MeanSquaredError()
+        'InChI_Name_Str': tf.losses.BinaryCrossentropy(),
+        'InChI_Name_Num': tf.losses.MeanSquaredError()
     }
-    losses_weights = {"InChI_Name_Str_Processing_LSTM": 1.0, "InChI_Name_Num_Processing_LSTM": 0.01}
+    losses_weights = {"InChI_Name_Str": 1.0, "InChI_Name_Num": 0.5}
 
-    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights, metrics=[levenshtein_distance])
+    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
 
     print("\n\n")
     inchi_name_model.summary()
@@ -683,18 +701,19 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=5e-4)
     # inchi_discriminator = build_discriminator(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
 
-    checkpoint_filepath = 'D:\\AI Projects\\Molecular_Translation\\'
+    checkpoint_filepath = 'D:\\AI Projects\\Molecular_Translation\\inchi_model_checkpoint.h5'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
         filepath=checkpoint_filepath,
         save_weights_only=False,
-        monitor='InChI_Name_Str_Processing_LSTM_mse',
+        monitor='val_loss',
         mode='min',
         save_best_only=True)
 
-    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, verbose=1, callbacks=[model_checkpoint_callback])
+    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, validation_data=validation_gen, validation_steps=10,
+                    verbose=2, callbacks=[model_checkpoint_callback])
 
     inchi_model.save("InChI_Model.h5")
 
