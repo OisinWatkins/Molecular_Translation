@@ -425,16 +425,16 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
     image_processing_head_input = keras.Input(shape=image_input_dimension)
-    image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu',
+    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_1')(image_processing_head_input)
     image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_1')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
+    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_2')(image_processing_head)
     image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_2')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=128, kernel_size=3, strides=(2, 2), activation='relu',
+    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_3')(image_processing_head)
     image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_3')(image_processing_head)
-    image_processing_head = layers.SeparableConv2D(filters=512, kernel_size=3, strides=(2, 2), activation='relu',
+    image_processing_head = layers.SeparableConv2D(filters=1024, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_4')(image_processing_head)
     image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_4')(image_processing_head)
     image_processing_head = layers.SeparableConv2D(filters=len_padded_str, kernel_size=3,
@@ -453,16 +453,10 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     # Fifth: Join outputs from the input heads and process into encoded strings
     combined_input_processed_1 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                              name='Combined_Input_LSTM_1')(image_processing_head)
-    combined_input_processed_1 = layers.Average(name='Combined_Input_AVG_1')([image_processing_head,
-                                                                              combined_input_processed_1])
     combined_input_processed_2 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                              name='Combined_Input_LSTM_2')(combined_input_processed_1)
-    combined_input_processed_2 = layers.Average(name='Combined_Input_AVG_2')([image_processing_head,
-                                                                              combined_input_processed_2])
     combined_input_processed_3 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                              name='Combined_Input_LSTM_3')(combined_input_processed_2)
-    combined_input_processed_3 = layers.Average(name='Combined_Input_AVG_3')([image_processing_head,
-                                                                              combined_input_processed_3])
     combined_input_processed_4 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
                                              name='Combined_Input_LSTM_4')(combined_input_processed_3)
 
@@ -710,10 +704,19 @@ if __name__ == '__main__':
         save_weights_only=False,
         monitor='val_loss',
         mode='min',
-        save_best_only=True)
+        save_best_only=True
+    )
+
+    early_stopping_callback = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        mode='min',
+        verbose=0,
+        patience=10,
+        min_delta=2
+    )
 
     inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, validation_data=validation_gen, validation_steps=10,
-                    verbose=2, callbacks=[model_checkpoint_callback])
+                    verbose=2, callbacks=[model_checkpoint_callback, early_stopping_callback])
 
     inchi_model.save("InChI_Model.h5")
 
