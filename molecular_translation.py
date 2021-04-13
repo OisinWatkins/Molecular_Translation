@@ -75,7 +75,8 @@ def encode_inchi_name(inchi_name: str, codex_list: list, padded_size: int = 300)
         else:
             char_index = codex_list.index(character)
             encoded_character = [-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
-                                 -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0]
+                                 -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0,
+                                 -1.0]
             encoded_character[char_index] = 1.0
             encoded_name.append([encoded_character, [0.0]])
 
@@ -123,24 +124,26 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
 
 
 def data_generator(labels: list, folder_options: list, codex_list: list, padded_size: int = 300, batch_size: int = 1,
-                   dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\',
+                   dataset_path: str = 'D:\\Datasets\\bms-molecular-translation\\train\\', return_name_str: bool = False,
                    folder_loop: int = 1, augment_data: bool = True, invert_image: bool = True, repeat_image: int = 1):
     """
     This generator provides the pre-processed image inputs for the model to use, as well as the input image's name and
     output InChI string.
 
-    :param labels:
-    :param folder_options:
-    :param codex_list:
-    :param padded_size:
-    :param batch_size:
-    :param dataset_path:
-    :param folder_loop:
-    :param augment_data:
-    :param invert_image:
-    :param repeat_image:
-    :return: image_data_array, output_string
+    :param labels: Training Labels provided by Kaggle
+    :param folder_options: The List of folders available to this generator
+    :param codex_list: Codex used for translation between string and encoded string
+    :param padded_size: The Padded size of the encoded strings used for the models
+    :param batch_size: Batch size of the generator output
+    :param dataset_path: Path to find the dataset
+    :param folder_loop: Iterate over the same folder for increased exposure to a single folder
+    :param augment_data: Augment the image data for training and validation
+    :param invert_image: Invert image colour from White bg to Black bg
+    :param repeat_image: Iterate over the same image for increased exposure
+    :return: image_data_array, output_string, {image_name}
     """
+
+    image_name = ''
     # Limitations on the Augmentation performed on the training and validation inputs
     translation_mag = 10
     rotations_mag = 180
@@ -193,7 +196,8 @@ def data_generator(labels: list, folder_options: list, codex_list: list, padded_
                             if augment_data:
                                 # Perform Augmentation
                                 image_data = image_data.rotate(angle=rand_rotation,
-                                                               translate=(rand_trans_mag_vert, rand_trans_mag_horizontal),
+                                                               translate=(
+                                                                   rand_trans_mag_vert, rand_trans_mag_horizontal),
                                                                fillcolor=bg_colour,
                                                                expand=True)
 
@@ -226,7 +230,10 @@ def data_generator(labels: list, folder_options: list, codex_list: list, padded_
                             output_str_batch[batch_num] = output_str_encoded
                             output_num_batch[batch_num] = output_num_encoded
 
-                        yield image_data_batch, [output_str_batch, output_num_batch]  # , image_name
+                        if return_name_str:
+                            yield image_data_batch, [output_str_batch, output_num_batch], image_name
+                        else:
+                            yield image_data_batch, [output_str_batch, output_num_batch]
 
 
 def levenshtein_distance(y_true, y_pred):
@@ -241,12 +248,14 @@ def levenshtein_distance(y_true, y_pred):
     return edit_distance
 
 
-def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None, loss_val_2=None):
+def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None,
+            loss_val_2=None):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
     if curr_presentation_num is not None and total_presentations is not None and loss_val_1 is not None and loss_val_2 is not None:
         print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
-              f'[Current Presentation: {curr_presentation_num}/{total_presentations}]', '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
+              f'[Current Presentation: {curr_presentation_num}/{total_presentations}]',
+              '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
     else:
         print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
 
@@ -415,11 +424,12 @@ This section is devoted to the InChI Text Generation model
 
 def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     """
+    Function to build a text generation model
 
-    :param len_encoded_str:
-    :param len_padded_str:
-    :param lr:
-    :return:
+    :param len_encoded_str: Length of the encoded string values in encoded input
+    :param len_padded_str: Length of padded encoded input sting
+    :param lr: Learning rate
+    :return: inchi_name_model
     """
 
     # First: let's build the Image Processing head of the model
@@ -442,7 +452,7 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
                                                    name='Image_Processing_Conv2D_5')(image_processing_head)
 
     image_processed_shape = K.int_shape(image_processing_head)
-    image_processing_head = layers.Reshape(target_shape=(image_processed_shape[1]*image_processed_shape[2],
+    image_processing_head = layers.Reshape(target_shape=(image_processed_shape[1] * image_processed_shape[2],
                                                          image_processed_shape[3]))(image_processing_head)
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
@@ -470,14 +480,14 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     inchi_name_model = models.Model(inputs=image_processing_head_input,
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
 
-    optimizer = tf.keras.optimizers.Adam(lr)
-    losses = {
-        'InChI_Name_Str': tf.losses.BinaryCrossentropy(),
-        'InChI_Name_Num': tf.losses.MeanSquaredError()
-    }
-    losses_weights = {"InChI_Name_Str": 1.0, "InChI_Name_Num": 0.5}
-
-    inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
+    # optimizer = tf.keras.optimizers.RMSprop(lr)
+    # losses = {
+    #     'InChI_Name_Str': tf.losses.BinaryCrossentropy(),
+    #     'InChI_Name_Num': tf.losses.MeanSquaredError()
+    # }
+    # losses_weights = {"InChI_Name_Str": 1.0, "InChI_Name_Num": 0.5}
+    #
+    # inchi_name_model.compile(optimizer=optimizer, loss=losses, loss_weights=losses_weights)
 
     print("\n\n")
     inchi_name_model.summary()
@@ -488,11 +498,12 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
 def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     """
+    Function to build a text discrimination model
 
-    :param len_encoded_str:
-    :param len_padded_str:
-    :param lr:
-    :return:
+    :param len_encoded_str: Length of the encoded string values in encoded input
+    :param len_padded_str: Length of padded encoded input sting
+    :param lr: Learning rate
+    :return: discriminator_model
     """
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
@@ -514,11 +525,10 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
                                                    name='Discr_Image_Processing_Conv2D_5')(image_processing_head)
 
     image_processed_shape = K.int_shape(image_processing_head)
-    image_processing_head = layers.Reshape(target_shape=(image_processed_shape[1]*image_processed_shape[2],
+    image_processing_head = layers.Reshape(target_shape=(image_processed_shape[1] * image_processed_shape[2],
                                                          image_processed_shape[3]))(image_processing_head)
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
-    # image_processing_head = tf_shuffle_axis(image_processing_head, axis=1)
 
     image_processing_head = layers.LSTM(units=1024, return_sequences=True,
                                         name='Discr_Image_Processing_LSTM_1')(image_processing_head)
@@ -538,16 +548,13 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     # Fifth: Join outputs from the input heads and process into encoded strings
     combined_input = tf.concat([image_processing_head, combined_name_processed], -1)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
                                            name='Discr_Combined_Input_LSTM_1')(combined_input)
-    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_1')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
                                            name='Discr_Combined_Input_LSTM_2')(combined_input_processed)
-    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_2')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
                                            name='Discr_Combined_Input_LSTM_3')(combined_input_processed)
-    combined_input_processed = layers.Dropout(0.1, name='Discr_Combined_Input_Dropout_3')(combined_input_processed)
-    combined_input_processed = layers.LSTM(units=1024, return_sequences=True,
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
                                            name='Discr_Combined_Input_LSTM_4')(combined_input_processed)
 
     # Sixth: Define each output tail and compile the model
@@ -556,14 +563,17 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     discriminator_output = layers.Dense(units=1, name='Discriminator_Dense',
                                         activation='sigmoid')(discriminator_output)
 
-    discriminator_model = models.Model(inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
-                                       outputs=discriminator_output, name="InChI_Name_Discriminator")
+    discriminator_model = models.Model(
+        inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
+        outputs=discriminator_output, name="InChI_Name_Discriminator"
+    )
 
     optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0)
     losses = {
         'Discriminator_Dense': tf.losses.BinaryCrossentropy()
     }
     discriminator_model.compile(optimizer=optimizer, loss=losses)
+
     discriminator_model.trainable = False
 
     print("\n\n")
@@ -638,13 +648,14 @@ if __name__ == '__main__':
 
     str_padding_len = 300
     num_repeat_image = 1
-    batch_length = 2
+    batch_length = 5
 
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations, codex, batch_size=batch_length,
                                padded_size=str_padding_len, repeat_image=num_repeat_image)
 
-    validation_gen = data_generator(training_labels, validation_folder_permutations, codex, padded_size=str_padding_len)
+    validation_gen = data_generator(training_labels, validation_folder_permutations, codex, return_name_str=True,
+                                    padded_size=str_padding_len)
 
     test_gen = data_generator(training_labels, testing_folder_permutations, codex,
                               padded_size=str_padding_len, augment_data=False)
@@ -695,8 +706,18 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=5e-4)
-    # inchi_discriminator = build_discriminator(len_encoded_str=codex_len+1, len_padded_str=str_padding_len, lr=1e-4)
+    inchi_model = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
+    inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=1e-4)
+
+    gan_input = keras.Input(shape=(1500, 1500, 1))
+    gan_output = inchi_discriminator([gan_input, inchi_model(gan_input)])
+    gan = models.Model(gan_input, gan_output, name='InChI_GAN')
+    gan_optimizer = keras.optimizers.RMSprop(lr=0.0004, clipvalue=1.0, decay=1e-8)
+    gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
+
+    print("\n\n")
+    gan.summary()
+    print("\n\n")
 
     checkpoint_filepath = 'D:\\AI Projects\\Molecular_Translation\\inchi_model_checkpoint.h5'
     model_checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
@@ -715,13 +736,45 @@ if __name__ == '__main__':
         min_delta=2
     )
 
-    inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, validation_data=validation_gen, validation_steps=10,
-                    verbose=2, callbacks=[model_checkpoint_callback, early_stopping_callback])
+    num_epochs = 10000
+    presentation_per_epoch = 500
+
+    for epoch in range(num_epochs):
+        for presentation in range(presentation_per_epoch):
+            # Generate some output strings
+            image_inputs, output_strs = next(train_gen)
+            generated_strs = inchi_model.predict(image_inputs)
+
+            # Concatenate generated strings to output strings
+            concat_str = tf.concat(values=[output_strs[0], generated_strs[0]], axis=0)
+            concat_num = tf.concat(values=[output_strs[1], generated_strs[1]], axis=0)
+
+            # Double the length of the Image batch, maintaining order
+            image_batch = tf.concat(values=[image_inputs, image_inputs], axis=0)
+
+            # Make Label list
+            ones = np.ones(shape=(batch_length, 1))
+            zeros = np.zeros(shape=(batch_length, 1))
+            labels = tf.concat(values=[ones, zeros], axis=0)
+
+            # Shuffle all inputs and labels
+            indices = tf.range(start=0, limit=batch_length)
+            shuffled_indices = tf.random.shuffle(indices)
+
+            concat_str_shuffled = tf.gather(concat_str, shuffled_indices, axis=0)
+            concat_num_shuffled = tf.gather(concat_num, shuffled_indices, axis=0)
+            concat_strings = [concat_str_shuffled, concat_num_shuffled]
+            image_batch_shuffled = tf.gather(image_batch, shuffled_indices, axis=0)
+            labels_shuffled = tf.gather(labels, shuffled_indices, axis=0)
 
     inchi_model.save("InChI_Model.h5")
+    inchi_discriminator.save("InChI_Discriminator.h5")
 
     """
     --------------------------------------------------------------------------------------------------------------------
     CVAE Built and Saved
     --------------------------------------------------------------------------------------------------------------------
     """
+
+# inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, validation_data=validation_gen, validation_steps=10,
+# verbose=2, callbacks=[model_checkpoint_callback, early_stopping_callback])
