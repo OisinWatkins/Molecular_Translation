@@ -710,7 +710,7 @@ if __name__ == '__main__':
     inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=1e-4)
 
     gan_input = keras.Input(shape=(1500, 1500, 1))
-    gan_output = inchi_discriminator([gan_input, inchi_model(gan_input)])
+    gan_output = inchi_discriminator([gan_input, inchi_model(gan_input)[0], inchi_model[1]])
     gan = models.Model(gan_input, gan_output, name='InChI_GAN')
     gan_optimizer = keras.optimizers.RMSprop(lr=0.0004, clipvalue=1.0, decay=1e-8)
     gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
@@ -763,9 +763,20 @@ if __name__ == '__main__':
 
             concat_str_shuffled = tf.gather(concat_str, shuffled_indices, axis=0)
             concat_num_shuffled = tf.gather(concat_num, shuffled_indices, axis=0)
-            concat_strings = [concat_str_shuffled, concat_num_shuffled]
             image_batch_shuffled = tf.gather(image_batch, shuffled_indices, axis=0)
             labels_shuffled = tf.gather(labels, shuffled_indices, axis=0)
+
+            # Train Discriminator first
+            d_loss = inchi_discriminator.fit(x=[image_batch_shuffled, concat_str_shuffled, concat_num_shuffled],
+                                             y=labels_shuffled,
+                                             epochs=1, verbose=0)
+
+            # Train Generator next by always predicting '0' with the GAN model
+            gan_image_batch = next(train_gen)
+            gan_labels = tf.zeros(shape=(batch_length, 1))
+
+            a_loss = gan.fit(x=gan_image_batch, y=gan_labels,
+                             epochs=1, verbose=0)
 
     inchi_model.save("InChI_Model.h5")
     inchi_discriminator.save("InChI_Discriminator.h5")
