@@ -103,19 +103,22 @@ def decode_inchi_name(encoded_name: list, codex_list: list):
     encoded_empty = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
                      0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
+    encoded_str = encoded_name[0]
+    encoded_nums = encoded_name[1]
+
     # For every encoded value in the list
-    for encoded_character in encoded_name:
+    for char, encoded_character in enumerate(encoded_str):
         # If the value encountered is a numeric value, concatenate the output string
-        if encoded_character[0][-1] == 1.0:
-            inchi_name = inchi_name + str(int(encoded_character[1][0]))
+        if encoded_character[-1] == 1.0:
+            inchi_name = inchi_name + str(int(encoded_nums[char]))
         # If the encoded character is empty, skip it
-        elif encoded_character[0] == encoded_empty:
+        elif all(encoded_character == encoded_empty):
             continue
         # Otherwise concatenate the value in the codex at that given index
         else:
             try:
                 # Attempt to decode the value provided
-                inchi_name = inchi_name + codex_list[encoded_character[0].index(1.0)]
+                inchi_name = inchi_name + codex_list[encoded_character.index(1.0)]
             except:
                 # If it doesn't work, move on
                 continue
@@ -231,7 +234,7 @@ def data_generator(labels: list, folder_options: list, codex_list: list, padded_
                             output_num_batch[batch_num] = output_num_encoded
 
                         if return_name_str:
-                            yield image_data_batch, [output_str_batch, output_num_batch], image_name
+                            yield image_data_batch, [output_str_batch, output_num_batch], output_string
                         else:
                             yield image_data_batch, [output_str_batch, output_num_batch]
 
@@ -248,16 +251,10 @@ def levenshtein_distance(y_true, y_pred):
     return edit_distance
 
 
-def progbar(curr, total, full_progbar, curr_presentation_num=None, total_presentations=None, loss_val_1=None,
-            loss_val_2=None):
+def progbar(curr: int = 0, total: int = 1, full_progbar: int = 20):
     frac = curr / total
     filled_progbar = round(frac * full_progbar)
-    if curr_presentation_num is not None and total_presentations is not None and loss_val_1 is not None and loss_val_2 is not None:
-        print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac),
-              f'[Current Presentation: {curr_presentation_num}/{total_presentations}]',
-              '[Str Loss Value: {:>7.2}]'.format(loss_val_1), '[Numeric Loss Val: {:>7.2}]'.format(loss_val_2), end='')
-    else:
-        print('\r', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
+    print('\r\t', '#' * filled_progbar + '-' * (full_progbar - filled_progbar), '[{:>7.2%}]'.format(frac), end='')
 
 
 def tf_shuffle_axis(value, axis=0, seed=None, name=None):
@@ -434,7 +431,7 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
-    image_processing_head_input = keras.Input(shape=image_input_dimension)
+    image_processing_head_input = keras.Input(shape=image_input_dimension, name='Generator_Input')
     image_processing_head = layers.SeparableConv2D(filters=64, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Image_Processing_Conv2D_1')(image_processing_head_input)
     image_processing_head = layers.Dropout(0.1, name='Image_Processing_Dropout_1')(image_processing_head)
@@ -507,7 +504,7 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     """
     # First: let's build the Image Processing head of the model
     image_input_dimension = (1500, 1500, 1)
-    image_processing_head_input = keras.Input(shape=image_input_dimension)
+    image_processing_head_input = keras.Input(shape=image_input_dimension, name='Discriminator_Image_Input')
     image_processing_head = layers.SeparableConv2D(filters=32, kernel_size=3, strides=(2, 2), activation='relu',
                                                    name='Discr_Image_Processing_Conv2D_1')(image_processing_head_input)
     image_processing_head = layers.Dropout(0.1, name='Discr_Image_Processing_Dropout_1')(image_processing_head)
@@ -535,11 +532,11 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     # Second: let's build the Encoded String input handling head
     str_input_dimension = (len_padded_str, len_encoded_str)
-    str_processing_head_input = keras.Input(shape=str_input_dimension)
+    str_processing_head_input = keras.Input(shape=str_input_dimension, name='Discriminator_Num_Input')
 
     # Third: let's build the Encoded Number input handling head
     num_input_dimension = (len_padded_str, 1)
-    num_processing_head_input = keras.Input(shape=num_input_dimension)
+    num_processing_head_input = keras.Input(shape=num_input_dimension, name='Discriminator_Str_Input')
 
     # Fourth: Concatenate the String and Number processed outputs
     combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
@@ -568,7 +565,7 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
         outputs=discriminator_output, name="InChI_Name_Discriminator"
     )
 
-    optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0)
+    optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0, decay=1e-8)
     losses = {
         'Discriminator_Dense': tf.losses.BinaryCrossentropy()
     }
@@ -648,17 +645,17 @@ if __name__ == '__main__':
 
     str_padding_len = 300
     num_repeat_image = 1
-    batch_length = 5
+    batch_length = 2
 
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations, codex, batch_size=batch_length,
                                padded_size=str_padding_len, repeat_image=num_repeat_image)
 
-    validation_gen = data_generator(training_labels, validation_folder_permutations, codex, return_name_str=True,
-                                    padded_size=str_padding_len)
+    validation_gen = data_generator(training_labels, validation_folder_permutations, codex, batch_size=1,
+                                    return_name_str=True, padded_size=str_padding_len)
 
-    test_gen = data_generator(training_labels, testing_folder_permutations, codex,
-                              padded_size=str_padding_len, augment_data=False)
+    test_gen = data_generator(training_labels, testing_folder_permutations, codex, batch_size=1,
+                              return_name_str=True, padded_size=str_padding_len, augment_data=False)
     print("\n-Data Generators are ready")
 
     """
@@ -706,11 +703,12 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_model = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
+    inchi_generator = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
     inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=1e-4)
 
-    gan_input = keras.Input(shape=(1500, 1500, 1))
-    gan_output = inchi_discriminator([gan_input, inchi_model(gan_input)[0], inchi_model[1]])
+    gan_input = keras.Input(shape=(1500, 1500, 1), name='GAN_Input')
+    text_gen_output = inchi_generator(gan_input)
+    gan_output = inchi_discriminator([gan_input, text_gen_output[0], text_gen_output[1]])
     gan = models.Model(gan_input, gan_output, name='InChI_GAN')
     gan_optimizer = keras.optimizers.RMSprop(lr=0.0004, clipvalue=1.0, decay=1e-8)
     gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
@@ -737,13 +735,23 @@ if __name__ == '__main__':
     )
 
     num_epochs = 10000
-    presentation_per_epoch = 500
+    presentation_per_epoch = 5
+    validation_steps = 5
 
-    for epoch in range(num_epochs):
+    old_val_loss = 0
+    patience = 10
+    patience_orig = 10
+
+    for epoch in range(1, num_epochs+1):
+        print(f"Epoch: {epoch}\n"
+              f"\tTraining:")
+        val_levenshtein_dist = 0
+
+        # Perform Training
         for presentation in range(presentation_per_epoch):
             # Generate some output strings
             image_inputs, output_strs = next(train_gen)
-            generated_strs = inchi_model.predict(image_inputs)
+            generated_strs = inchi_generator.predict(image_inputs)
 
             # Concatenate generated strings to output strings
             concat_str = tf.concat(values=[output_strs[0], generated_strs[0]], axis=0)
@@ -772,20 +780,74 @@ if __name__ == '__main__':
                                              epochs=1, verbose=0)
 
             # Train Generator next by always predicting '0' with the GAN model
-            gan_image_batch = next(train_gen)
+            gan_image_batch = next(train_gen)[0]
             gan_labels = tf.zeros(shape=(batch_length, 1))
 
             a_loss = gan.fit(x=gan_image_batch, y=gan_labels,
                              epochs=1, verbose=0)
 
-    inchi_model.save("InChI_Model.h5")
-    inchi_discriminator.save("InChI_Discriminator.h5")
+            # Display Progress
+            progbar(presentation, presentation_per_epoch)
+            print("  d_loss: ", '[{:>7.2}]'.format(d_loss.history['loss'][0]),
+                  "  a_loss: ", '[{:>7.2}]'.format(a_loss.history['loss'][0]), end='')
 
-    """
-    --------------------------------------------------------------------------------------------------------------------
-    CVAE Built and Saved
-    --------------------------------------------------------------------------------------------------------------------
-    """
+        progbar(presentation_per_epoch, presentation_per_epoch)
+        print("  d_loss: ", '[{:>7.2}]'.format(d_loss.history['loss'][0]),
+              "  a_loss: ", '[{:>7.2}]'.format(a_loss.history['loss'][0]))
+        print(f"\tValidating:")
+
+        # Perform Validation
+        for step in range(validation_steps):
+            validation_images, validation_outputs, validation_strings = next(validation_gen)
+
+            val_prediction = inchi_generator.predict(validation_images)
+
+            val_str_prediction = np.round(val_prediction[0]).reshape((str_padding_len, len(codex)+1))
+            val_num_prediction = np.round(val_prediction[1]).reshape((str_padding_len, 1))
+
+            val_total_prediction = [val_str_prediction, val_num_prediction]
+            predicted_inchi = decode_inchi_name(val_total_prediction, codex)
+            step_levenshtein_dist = nltk.edit_distance(predicted_inchi, validation_strings)
+            val_levenshtein_dist += step_levenshtein_dist
+
+            # Display Progress
+            progbar(step, validation_steps)
+            print("  Cur. Levenshtein Distance: ", '[{:>7.2}]'.format(step_levenshtein_dist), end='')
+
+        mean_val_levenshtein_dist = val_levenshtein_dist / validation_steps
+        progbar(validation_steps, validation_steps)
+        print(f"  Avg. Levenshtein Distance: ", '[{:>7.2}]'.format(mean_val_levenshtein_dist))
+
+        # Handle Training Patience and Checkpoint if not on the first epoch
+        if not epoch == 1:
+            # If validation has exceeded performance from previous cycles, save new checkpoint
+            if mean_val_levenshtein_dist < old_val_loss:
+                inchi_generator.save("InChI_Generator_Checkpoint.h5", overwrite=True)
+                inchi_discriminator.save("InChI_Discriminator_Checkpoint.h5", overwrite=True)
+
+            # If the validation performance has degraded w.r.t the last epoch, deduct from patience
+            if mean_val_levenshtein_dist > old_val_loss:
+                patience -= 1
+
+            # Else add to patience up to a maximum of the original patience val
+            else:
+                if patience <= patience_orig:
+                    patience += 1
+
+        else:
+            # Checkpoint on 1st epoch
+            inchi_generator.save("InChI_Generator_Checkpoint.h5", overwrite=True)
+            inchi_discriminator.save("InChI_Discriminator_Checkpoint.h5", overwrite=True)
+
+        # End training if the patience value has expired
+        if patience == 0:
+            break
+
+        # Pass on the new val loss
+        old_val_loss = mean_val_levenshtein_dist
+
+    inchi_generator.save("InChI_Generator.h5")
+    inchi_discriminator.save("InChI_Discriminator.h5")
 
 # inchi_model.fit(x=train_gen, epochs=10000, steps_per_epoch=50, validation_data=validation_gen, validation_steps=10,
 # verbose=2, callbacks=[model_checkpoint_callback, early_stopping_callback])
