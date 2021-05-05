@@ -454,25 +454,39 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     image_processing_head = tf.transpose(image_processing_head, perm=[0, 2, 1])
 
-    image_processing_head = layers.LSTM(units=512, return_sequences=True,
+    image_processing_head = layers.LSTM(units=1024, return_sequences=True,
                                         name='Image_Processing_LSTM_1')(image_processing_head)
 
     # Fifth: Join outputs from the input heads and process into encoded strings
-    combined_input_processed_1 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                             name='Combined_Input_LSTM_1')(image_processing_head)
-    combined_input_processed_2 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                             name='Combined_Input_LSTM_2')(combined_input_processed_1)
-    combined_input_processed_3 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                             name='Combined_Input_LSTM_3')(combined_input_processed_2)
-    combined_input_processed_4 = layers.LSTM(units=512, return_sequences=True, dropout=0.1,
-                                             name='Combined_Input_LSTM_4')(combined_input_processed_3)
+    combined_input_processed_1_1 = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                               name='Combined_Input_LSTM_1')(image_processing_head)
+    combined_input_processed_1_2 = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                               name='Combined_Input_LSTM_2')(combined_input_processed_1_1)
+    combined_input_processed_1_3 = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                               name='Combined_Input_LSTM_3')(combined_input_processed_1_2)
+    combined_input_processed_1_4 = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                               name='Combined_Input_LSTM_4')(combined_input_processed_1_3)
+
+    combined_input_processed_2_1 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
+                                                          name='Combined_Input_Conv1D_1')(image_processing_head)
+    combined_input_processed_2_1 = layers.Dropout(0.1, name='Combined_Input_Dropout_1')(combined_input_processed_2_1)
+    combined_input_processed_2_2 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
+                                                          name='Combined_Input_Conv1D_2')(combined_input_processed_2_1)
+    combined_input_processed_2_2 = layers.Dropout(0.1, name='Combined_Input_Dropout_2')(combined_input_processed_2_2)
+    combined_input_processed_2_3 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
+                                                          name='Combined_Input_Conv1D_3')(combined_input_processed_2_2)
+    combined_input_processed_2_3 = layers.Dropout(0.1, name='Combined_Input_Dropout_3')(combined_input_processed_2_3)
+    combined_input_processed_2_4 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
+                                                          name='Combined_Input_Conv1D_3')(combined_input_processed_2_3)
 
     # Sixth: Define each output tail and compile the model
+    processing_concat = layers.Concatenate(name='Processing_Concatenate')([combined_input_processed_1_4,
+                                                                           combined_input_processed_2_4])
     inchi_name_output_str = layers.LSTM(units=len_encoded_str, activation='tanh', return_sequences=True,
-                                        name='InChI_Name_Str')(combined_input_processed_4)
+                                        name='InChI_Name_Str')(processing_concat)
 
     inchi_name_output_num = layers.LSTM(units=1, activation=None, return_sequences=True,
-                                        name='InChI_Name_Num')(combined_input_processed_4)
+                                        name='InChI_Name_Num')(processing_concat)
 
     inchi_name_model = models.Model(inputs=image_processing_head_input,
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
@@ -645,7 +659,7 @@ if __name__ == '__main__':
 
     str_padding_len = 300
     num_repeat_image = 1
-    batch_length = 2
+    batch_length = 15
 
     # Instantiate all generators needed for training, validation and testing
     train_gen = data_generator(training_labels, training_folder_permutations, codex, batch_size=batch_length,
@@ -704,13 +718,13 @@ if __name__ == '__main__':
     --------------------------------------------------------------------------------------------------------------------
     """
     inchi_generator = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
-    inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=1e-4)
+    inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
 
     gan_input = keras.Input(shape=(1500, 1500, 1), name='GAN_Input')
     text_gen_output = inchi_generator(gan_input)
     gan_output = inchi_discriminator([gan_input, text_gen_output[0], text_gen_output[1]])
     gan = models.Model(gan_input, gan_output, name='InChI_GAN')
-    gan_optimizer = keras.optimizers.RMSprop(lr=0.0004, clipvalue=1.0, decay=1e-8)
+    gan_optimizer = keras.optimizers.RMSprop(lr=0.001, clipvalue=1.0, decay=1e-8)
     gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
 
     print("\n\n")
@@ -735,12 +749,19 @@ if __name__ == '__main__':
     )
 
     num_epochs = 10000
-    presentation_per_epoch = 5
-    validation_steps = 5
+    presentation_per_epoch = 100
+    validation_steps = 50
 
     old_val_loss = 0
     patience = 10
     patience_orig = 10
+
+    print(f"Training Hyperparameters:\n"
+          f"\tEpochs: {num_epochs}\n"
+          f"\tPresentations per Epoch: {presentation_per_epoch}\n"
+          f"\tBatch Size: {batch_length}\n"
+          f"\tValidation Steps: {validation_steps}\n"
+          f"\tTraining Patience: {patience}\n")
 
     for epoch in range(1, num_epochs+1):
         print(f"Epoch: {epoch}\n"
@@ -812,11 +833,11 @@ if __name__ == '__main__':
 
             # Display Progress
             progbar(step, validation_steps)
-            print("  Cur. Levenshtein Distance: ", '[{:>7.2}]'.format(step_levenshtein_dist), end='')
+            print("  Cur. Levenshtein Distance: ", '[{:>7}]'.format(step_levenshtein_dist), end='')
 
         mean_val_levenshtein_dist = val_levenshtein_dist / validation_steps
         progbar(validation_steps, validation_steps)
-        print(f"  Avg. Levenshtein Distance: ", '[{:>7.2}]'.format(mean_val_levenshtein_dist))
+        print(f"  Avg. Levenshtein Distance: ", '[{:>7}]'.format(mean_val_levenshtein_dist))
 
         # Handle Training Patience and Checkpoint if not on the first epoch
         if not epoch == 1:
@@ -832,7 +853,7 @@ if __name__ == '__main__':
             # Else add to patience up to a maximum of the original patience val
             else:
                 if patience <= patience_orig:
-                    patience += 1
+                    patience += 0.5
 
         else:
             # Checkpoint on 1st epoch
@@ -840,7 +861,7 @@ if __name__ == '__main__':
             inchi_discriminator.save("InChI_Discriminator_Checkpoint.h5", overwrite=True)
 
         # End training if the patience value has expired
-        if patience == 0:
+        if patience <= 0:
             break
 
         # Pass on the new val loss
