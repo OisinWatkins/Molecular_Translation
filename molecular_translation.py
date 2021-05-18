@@ -467,26 +467,12 @@ def build_text_gen(len_encoded_str, len_padded_str=300, lr=1e-4):
     combined_input_processed_1_4 = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
                                                name='Combined_Input_LSTM_4')(combined_input_processed_1_3)
 
-    combined_input_processed_2_1 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
-                                                          name='Combined_Input_Conv1D_1')(image_processing_head)
-    combined_input_processed_2_1 = layers.Dropout(0.1, name='Combined_Input_Dropout_1')(combined_input_processed_2_1)
-    combined_input_processed_2_2 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
-                                                          name='Combined_Input_Conv1D_2')(combined_input_processed_2_1)
-    combined_input_processed_2_2 = layers.Dropout(0.1, name='Combined_Input_Dropout_2')(combined_input_processed_2_2)
-    combined_input_processed_2_3 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
-                                                          name='Combined_Input_Conv1D_3')(combined_input_processed_2_2)
-    combined_input_processed_2_3 = layers.Dropout(0.1, name='Combined_Input_Dropout_3')(combined_input_processed_2_3)
-    combined_input_processed_2_4 = layers.SeparableConv1D(filters=1024, kernel_size=1, strides=1, activation='tanh', padding='same',
-                                                          name='Combined_Input_Conv1D_3')(combined_input_processed_2_3)
-
     # Sixth: Define each output tail and compile the model
-    processing_concat = layers.Concatenate(name='Processing_Concatenate')([combined_input_processed_1_4,
-                                                                           combined_input_processed_2_4])
     inchi_name_output_str = layers.LSTM(units=len_encoded_str, activation='tanh', return_sequences=True,
-                                        name='InChI_Name_Str')(processing_concat)
+                                        name='InChI_Name_Str')(combined_input_processed_1_4)
 
     inchi_name_output_num = layers.LSTM(units=1, activation=None, return_sequences=True,
-                                        name='InChI_Name_Num')(processing_concat)
+                                        name='InChI_Name_Num')(combined_input_processed_1_4)
 
     inchi_name_model = models.Model(inputs=image_processing_head_input,
                                     outputs=[inchi_name_output_str, inchi_name_output_num], name="InChI_Name_Generator")
@@ -717,14 +703,17 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    inchi_generator = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
-    inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=5e-4)
+    gan_lr = 0.0025
+    gan_decay = 1e-8
+    disc_lr = 1e-4
+    inchi_generator = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len)
+    inchi_discriminator = build_discriminator(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len, lr=disc_lr)
 
     gan_input = keras.Input(shape=(1500, 1500, 1), name='GAN_Input')
     text_gen_output = inchi_generator(gan_input)
     gan_output = inchi_discriminator([gan_input, text_gen_output[0], text_gen_output[1]])
     gan = models.Model(gan_input, gan_output, name='InChI_GAN')
-    gan_optimizer = keras.optimizers.RMSprop(lr=0.001, clipvalue=1.0, decay=1e-8)
+    gan_optimizer = keras.optimizers.RMSprop(lr=gan_lr, clipvalue=1.0, decay=gan_decay)
     gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
 
     print("\n\n")
@@ -761,7 +750,10 @@ if __name__ == '__main__':
           f"\tPresentations per Epoch: {presentation_per_epoch}\n"
           f"\tBatch Size: {batch_length}\n"
           f"\tValidation Steps: {validation_steps}\n"
-          f"\tTraining Patience: {patience}\n")
+          f"\tTraining Patience: {patience}\n\n"
+          f"\tGan Learning Rate: {gan_lr}\n"
+          f"\tGan Decay: {gan_decay}\n"
+          f"\tDiscriminator Learning Rate: {disc_lr}\n")
 
     for epoch in range(1, num_epochs+1):
         print(f"Epoch: {epoch}\n"
