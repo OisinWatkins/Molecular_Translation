@@ -558,7 +558,7 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     discriminator_output = layers.Flatten(name='Discriminator_Flatten')(combined_input_processed)
     discriminator_output = layers.Dropout(0.4, name='Discriminator_Dropout')(discriminator_output)
     discriminator_output = layers.Dense(units=1, name='Discriminator_Dense',
-                                        activation='sigmoid')(discriminator_output)
+                                        activation='tanh')(discriminator_output)
 
     discriminator_model = models.Model(
         inputs=[image_processing_head_input, str_processing_head_input, num_processing_head_input],
@@ -567,7 +567,7 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
 
     optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0, decay=1e-8)
     losses = {
-        'Discriminator_Dense': tf.losses.BinaryCrossentropy()
+        'Discriminator_Dense': tf.losses.MeanSquaredError()
     }
     discriminator_model.compile(optimizer=optimizer, loss=losses)
 
@@ -578,6 +578,62 @@ def build_discriminator(len_encoded_str, len_padded_str=300, lr=1e-4):
     print("\n\n")
 
     return discriminator_model
+
+
+def build_adjudicator(len_encoded_str, len_padded_str=300, lr=1e-4):
+    """
+    Function to build a text adjudicator model
+
+    :param len_encoded_str: Length of the encoded string values in encoded input
+    :param len_padded_str: Length of padded encoded input sting
+    :param lr: Learning rate
+    :return: adjudicator_model
+    """
+    # Second: let's build the Encoded String input handling head
+    str_input_dimension = (len_padded_str, len_encoded_str)
+    str_processing_head_input = keras.Input(shape=str_input_dimension, name='Discriminator_Num_Input')
+
+    # Third: let's build the Encoded Number input handling head
+    num_input_dimension = (len_padded_str, 1)
+    num_processing_head_input = keras.Input(shape=num_input_dimension, name='Discriminator_Str_Input')
+
+    # Fourth: Concatenate the String and Number processed outputs
+    combined_name_input = tf.concat([str_processing_head_input, num_processing_head_input], -1)
+    combined_name_processed = layers.LSTM(units=1024, return_sequences=True,
+                                          name='Adj_Combined_Name_LSTM_1')(combined_name_input)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                           name='Adj_Combined_Input_LSTM_1')(combined_name_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                           name='Adj_Combined_Input_LSTM_2')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                           name='Adj_Combined_Input_LSTM_3')(combined_input_processed)
+    combined_input_processed = layers.LSTM(units=1024, return_sequences=True, dropout=0.1,
+                                           name='Adj_Combined_Input_LSTM_4')(combined_input_processed)
+
+    # Sixth: Define each output tail and compile the model
+    discriminator_output = layers.Flatten(name='Adj_Flatten')(combined_input_processed)
+    discriminator_output = layers.Dropout(0.4, name='Adj_Dropout')(discriminator_output)
+    discriminator_output = layers.Dense(units=1, name='Adj_Dense',
+                                        activation='sigmoid')(discriminator_output)
+
+    adjudicator_model = models.Model(
+        inputs=[str_processing_head_input, num_processing_head_input],
+        outputs=discriminator_output, name="InChI_Name_Adjudicator"
+    )
+
+    optimizer = tf.keras.optimizers.RMSprop(lr, clipvalue=1.0, decay=1e-8)
+    losses = {
+        'Adj_Dense': tf.losses.BinaryCrossentropy()
+    }
+    adjudicator_model.compile(optimizer=optimizer, loss=losses)
+
+    adjudicator_model.trainable = False
+
+    print("\n\n")
+    adjudicator_model.summary()
+    print("\n\n")
+
+    adjudicator_model
 
 
 """
@@ -703,7 +759,7 @@ if __name__ == '__main__':
     Now building and training InChI String Generation Model
     --------------------------------------------------------------------------------------------------------------------
     """
-    gan_lr = 0.0025
+    gan_lr = 1e-3
     gan_decay = 1e-8
     disc_lr = 1e-4
     inchi_generator = build_text_gen(len_encoded_str=codex_len + 1, len_padded_str=str_padding_len)
@@ -714,7 +770,7 @@ if __name__ == '__main__':
     gan_output = inchi_discriminator([gan_input, text_gen_output[0], text_gen_output[1]])
     gan = models.Model(gan_input, gan_output, name='InChI_GAN')
     gan_optimizer = keras.optimizers.RMSprop(lr=gan_lr, clipvalue=1.0, decay=gan_decay)
-    gan.compile(optimizer=gan_optimizer, loss='binary_crossentropy')
+    gan.compile(optimizer=gan_optimizer, loss='mse')
 
     print("\n\n")
     gan.summary()
@@ -775,7 +831,7 @@ if __name__ == '__main__':
 
             # Make Label list
             ones = np.ones(shape=(batch_length, 1))
-            zeros = np.zeros(shape=(batch_length, 1))
+            zeros = -1 * np.ones(shape=(batch_length, 1))
             labels = tf.concat(values=[ones, zeros], axis=0)
 
             # Shuffle all inputs and labels
@@ -794,7 +850,7 @@ if __name__ == '__main__':
 
             # Train Generator next by always predicting '0' with the GAN model
             gan_image_batch = next(train_gen)[0]
-            gan_labels = tf.zeros(shape=(batch_length, 1))
+            gan_labels = -1 * tf.ones(shape=(batch_length, 1))
 
             a_loss = gan.fit(x=gan_image_batch, y=gan_labels,
                              epochs=1, verbose=0)
